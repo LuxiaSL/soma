@@ -266,15 +266,6 @@ Tables:
 
 ---
 
-## Naming
-
-The naming follows the Anima ecosystem conventions:
-
-- **Soma**: The cell body — the core, where signals originate
-- **Ichor**: In Greek mythology, the ethereal fluid flowing through the veins of immortal beings
-
----
-
 ## Documentation
 
 | Document | Description |
