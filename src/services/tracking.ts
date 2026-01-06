@@ -133,3 +133,4 @@ export function getTrackedMessageCount(db: Database): number {
   return row.count
 }
 
+
