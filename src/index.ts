@@ -4,6 +4,8 @@
  * Entry point for the Soma API server and Discord bot
  */
 
+import 'dotenv/config'
+
 import { loadConfig } from './config.js'
 import { initDatabase, closeDatabase } from './db/connection.js'
 import { ApiServer } from './api/server.js'
