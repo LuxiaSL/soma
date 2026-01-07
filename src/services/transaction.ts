@@ -94,7 +94,8 @@ export function getTransactionsForUser(
 
   return rows.map(row => ({
     id: row.id,
-    timestamp: new Date(row.timestamp),
+    // SQLite datetime('now') returns UTC, append 'Z' so JS Date parses it correctly
+    timestamp: new Date(row.timestamp.replace(' ', 'T') + 'Z'),
     serverId: row.server_id,
     type: row.type as TransactionType,
     fromUserId: row.from_user_id,
@@ -120,7 +121,8 @@ export function getTransactionById(db: Database, id: string): Transaction | null
 
   return {
     id: row.id,
-    timestamp: new Date(row.timestamp),
+    // SQLite datetime('now') returns UTC, append 'Z' so JS Date parses it correctly
+    timestamp: new Date(row.timestamp.replace(' ', 'T') + 'Z'),
     serverId: row.server_id,
     type: row.type as TransactionType,
     fromUserId: row.from_user_id,

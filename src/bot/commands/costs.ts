@@ -1,7 +1,7 @@
 /**
  * /costs Command
  * 
- * View bot activation costs for the server
+ * View bot activation costs for the server (or all known servers in DMs)
  */
 
 import {
@@ -10,10 +10,10 @@ import {
   MessageFlags,
 } from 'discord.js'
 import type { Database } from 'better-sqlite3'
-import type { BotCostRow } from '../../types/index.js'
 import { getBalance, getEffectiveCostMultiplier } from '../../services/balance.js'
+import { getAllBotCosts, getUserKnownServersCosts } from '../../services/cost.js'
 import { getOrCreateUser, getOrCreateServer } from '../../services/user.js'
-import { createCostsEmbed } from '../embeds/builders.js'
+import { createCostsEmbed, createAllServersCostsEmbed } from '../embeds/builders.js'
 import { logger } from '../../utils/logger.js'
 
 export const costsCommand = new SlashCommandBuilder()
@@ -32,17 +32,40 @@ export async function executeCosts(
   const serverId = interaction.guildId
   const specificBot = interaction.options.getString('bot')
 
+  // Ensure user exists
+  const user = getOrCreateUser(db, interaction.user.id)
+
+  // In DMs: show costs from all servers the user is known to be in
   if (!serverId) {
+    const balanceData = getBalance(db, user.id)
+    
+    // Get costs only from servers the user has been seen in
+    const serverCosts = getUserKnownServersCosts(db, user.id)
+    
+    if (serverCosts.length === 0) {
+      await interaction.reply({
+        content: '❌ No bot costs found. Use `/costs` in a server first to see costs there.',
+        flags: MessageFlags.Ephemeral,
+      })
+      return
+    }
+
+    const embed = createAllServersCostsEmbed(serverCosts, balanceData.balance)
+
+    logger.debug({
+      userId: user.id,
+      serverCount: serverCosts.length,
+    }, 'Costs command executed (DM - all known servers)')
+
     await interaction.reply({
-      content: '❌ This command can only be used in a server.',
+      embeds: [embed],
       flags: MessageFlags.Ephemeral,
     })
     return
   }
 
-  // Ensure user and server exist
-  const user = getOrCreateUser(db, interaction.user.id)
-  const server = getOrCreateServer(db, serverId)
+  // In server: show this server's costs
+  const server = getOrCreateServer(db, serverId, interaction.guild?.name)
 
   // Get user's roles for multipliers
   const userRoles: string[] = interaction.member
@@ -53,37 +76,20 @@ export async function executeCosts(
   const balanceData = getBalance(db, user.id, serverId, userRoles)
   const costMultiplier = getEffectiveCostMultiplier(db, serverId, userRoles)
 
-  // Get bot costs for this server
-  let query = `
-    SELECT 
-      bc.bot_discord_id,
-      bc.base_cost,
-      bc.description,
-      COALESCE(bc.description, bc.bot_discord_id) as name
-    FROM bot_costs bc
-    WHERE bc.server_id = ? OR bc.server_id IS NULL
-    ORDER BY bc.base_cost ASC
-  `
-  const params: any[] = [server.id]
+  // Get bot costs for this server (with proper deduplication)
+  let allCosts = getAllBotCosts(db, serverId)
 
+  // Filter by specific bot if provided
   if (specificBot) {
-    query = `
-      SELECT 
-        bc.bot_discord_id,
-        bc.base_cost,
-        bc.description,
-        COALESCE(bc.description, bc.bot_discord_id) as name
-      FROM bot_costs bc
-      WHERE (bc.server_id = ? OR bc.server_id IS NULL)
-      AND (bc.bot_discord_id = ? OR bc.description LIKE ?)
-      ORDER BY bc.base_cost ASC
-    `
-    params.push(specificBot, `%${specificBot}%`)
+    const searchLower = specificBot.toLowerCase()
+    allCosts = allCosts.filter(c =>
+      c.botDiscordId === specificBot ||
+      c.botDiscordId.includes(specificBot) ||
+      (c.description && c.description.toLowerCase().includes(searchLower))
+    )
   }
 
-  const costs = db.prepare(query).all(...params) as (BotCostRow & { name: string })[]
-
-  if (costs.length === 0) {
+  if (allCosts.length === 0) {
     await interaction.reply({
       content: specificBot
         ? `❌ No bot found matching "${specificBot}".`
@@ -94,12 +100,12 @@ export async function executeCosts(
   }
 
   // Calculate effective costs and affordability
-  const bots = costs.map(bot => {
-    const effectiveCost = bot.base_cost * costMultiplier
+  const bots = allCosts.map(bot => {
+    const effectiveCost = bot.baseCost * costMultiplier
     return {
-      name: bot.name || bot.bot_discord_id,
+      name: bot.description || bot.botDiscordId,
       cost: effectiveCost,
-      description: bot.description,
+      description: null,  // Don't duplicate description - it's already in the name
       canAfford: balanceData.balance >= effectiveCost,
     }
   })

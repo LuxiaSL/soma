@@ -7,6 +7,7 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import type { Server } from 'http'
 import type { Database } from 'better-sqlite3'
 import type { ApiConfig } from '../types/index.js'
+import type { SomaEventBus } from '../types/events.js'
 import { createAuthMiddleware } from './middleware/auth.js'
 import { SomaError } from '../utils/errors.js'
 import { logger } from '../utils/logger.js'
@@ -30,10 +31,17 @@ export class ApiServer {
 
   constructor(
     private config: ApiConfig,
-    private db: Database
+    private db: Database,
+    eventBus?: SomaEventBus
   ) {
     this.app = express()
     this.startTime = new Date()
+
+    // Make eventBus available to routes via app.get('eventBus')
+    if (eventBus) {
+      this.app.set('eventBus', eventBus)
+    }
+
     this.setupMiddleware()
     this.setupRoutes()
     this.setupErrorHandler()

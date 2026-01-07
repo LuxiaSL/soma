@@ -19,6 +19,7 @@ import { balanceCommand, executeBalance } from './balance.js'
 import { transferCommand, executeTransfer } from './transfer.js'
 import { costsCommand, executeCosts } from './costs.js'
 import { historyCommand, executeHistory } from './history.js'
+import { leaderboardCommand, executeLeaderboard } from './leaderboard.js'
 import { somaAdminCommand, executeSomaAdmin } from './admin.js'
 import { handleButton } from '../handlers/buttons.js'
 import { handleAutocomplete } from '../handlers/autocomplete.js'
@@ -29,11 +30,17 @@ const commands = [
   transferCommand,
   costsCommand,
   historyCommand,
+  leaderboardCommand,
   somaAdminCommand,
 ]
 
 /**
  * Register slash commands with Discord
+ * 
+ * If SOMA_DEV_GUILD_ID is set, registers to that guild only (instant) and clears global commands.
+ * Otherwise registers globally (takes ~1 hour to propagate) and clears guild commands.
+ * 
+ * This prevents duplicate commands from appearing.
  */
 export async function registerCommands(token: string): Promise<void> {
   const rest = new REST({ version: '10' }).setToken(token)
@@ -41,18 +48,56 @@ export async function registerCommands(token: string): Promise<void> {
   try {
     const commandData = commands.map(cmd => cmd.toJSON())
 
-    logger.info({ commandCount: commandData.length }, 'Registering slash commands...')
-
     // Get client ID from token
     const base64 = token.split('.')[0]
     const clientId = Buffer.from(base64, 'base64').toString()
 
-    // Register globally (takes ~1 hour to propagate)
-    await rest.put(Routes.applicationCommands(clientId), {
-      body: commandData,
-    })
+    // Check for dev guild (instant registration for testing)
+    const devGuildId = process.env.SOMA_DEV_GUILD_ID
 
-    logger.info('Successfully registered slash commands')
+    if (devGuildId) {
+      logger.info({ 
+        commandCount: commandData.length,
+        guildId: devGuildId,
+      }, 'Registering slash commands to dev guild (instant)...')
+
+      // Register to dev guild
+      await rest.put(Routes.applicationGuildCommands(clientId, devGuildId), {
+        body: commandData,
+      })
+
+      // Clear global commands to prevent duplicates
+      logger.info('Clearing global commands to prevent duplicates...')
+      await rest.put(Routes.applicationCommands(clientId), {
+        body: [],
+      })
+
+      logger.info({ guildId: devGuildId }, 'Successfully registered slash commands to dev guild')
+    } else {
+      logger.info({ commandCount: commandData.length }, 'Registering slash commands globally...')
+
+      // Register globally (takes ~1 hour to propagate)
+      await rest.put(Routes.applicationCommands(clientId), {
+        body: commandData,
+      })
+
+      // Clear any dev guild commands if we know the guild ID from previous runs
+      // Users should manually clear guild commands if switching from dev to prod
+      
+      logger.info('Successfully registered slash commands globally (may take up to 1 hour to propagate)')
+      logger.info('Note: If you see duplicate commands, clear guild commands with SOMA_CLEAR_GUILD_COMMANDS=<guildId>')
+    }
+
+    // Optional: Clear specific guild commands on demand
+    const clearGuildId = process.env.SOMA_CLEAR_GUILD_COMMANDS
+    if (clearGuildId) {
+      logger.info({ guildId: clearGuildId }, 'Clearing guild-specific commands...')
+      await rest.put(Routes.applicationGuildCommands(clientId, clearGuildId), {
+        body: [],
+      })
+      logger.info({ guildId: clearGuildId }, 'Guild commands cleared')
+    }
+
   } catch (error) {
     logger.error({ error }, 'Failed to register slash commands')
     throw error
@@ -142,6 +187,10 @@ async function handleCommand(
 
     case 'history':
       await executeHistory(interaction, db)
+      break
+
+    case 'leaderboard':
+      await executeLeaderboard(interaction, db)
       break
 
     case 'soma':

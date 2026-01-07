@@ -89,31 +89,49 @@ export function getUserById(db: Database, id: string): User | null {
 
 /**
  * Get or create a server by Discord ID
+ * Optionally updates the server name in config if provided
  */
-export function getOrCreateServer(db: Database, discordId: string): Server {
+export function getOrCreateServer(db: Database, discordId: string, serverName?: string): Server {
   // Try to find existing server
   const existing = db.prepare(`
     SELECT id, discord_id, config, created_at FROM servers WHERE discord_id = ?
   `).get(discordId) as ServerRow | undefined
 
   if (existing) {
+    const config = parseServerConfig(existing.config)
+    
+    // Update server name if provided and different
+    if (serverName && config.name !== serverName) {
+      const updatedConfig = { ...config, name: serverName }
+      db.prepare(`
+        UPDATE servers SET config = ? WHERE id = ?
+      `).run(JSON.stringify(updatedConfig), existing.id)
+      
+      return {
+        id: existing.id,
+        discordId: existing.discord_id,
+        config: updatedConfig,
+        createdAt: new Date(existing.created_at),
+      }
+    }
+    
     return {
       id: existing.id,
       discordId: existing.discord_id,
-      config: parseServerConfig(existing.config),
+      config,
       createdAt: new Date(existing.created_at),
     }
   }
 
   // Create new server
   const id = generateId()
-  const config = getDefaultServerConfig()
+  const config = { ...getDefaultServerConfig(), name: serverName }
 
   db.prepare(`
     INSERT INTO servers (id, discord_id, config) VALUES (?, ?, ?)
   `).run(id, discordId, JSON.stringify(config))
 
-  logger.info({ discordId, id }, 'Created new server')
+  logger.info({ discordId, id, name: serverName }, 'Created new server')
 
   return {
     id,
@@ -145,11 +163,13 @@ export function getServerByDiscordId(db: Database, discordId: string): Server | 
 
 /**
  * Update server configuration
+ * @param modifiedBy Discord user ID who made the change (optional, for tracking)
  */
 export function updateServerConfig(
   db: Database,
   serverId: string,
-  config: Partial<import('../types/index.js').ServerConfig>
+  config: Partial<import('../types/index.js').ServerConfig>,
+  modifiedBy?: string
 ): void {
   const existing = db.prepare(`
     SELECT config FROM servers WHERE id = ?
@@ -160,11 +180,28 @@ export function updateServerConfig(
   }
 
   const currentConfig = parseServerConfig(existing.config)
-  const newConfig = { ...currentConfig, ...config }
+  const newConfig = { 
+    ...currentConfig, 
+    ...config,
+    // Track who modified and when
+    lastModifiedBy: modifiedBy || currentConfig.lastModifiedBy,
+    lastModifiedAt: modifiedBy ? new Date().toISOString() : currentConfig.lastModifiedAt,
+  }
 
   db.prepare(`
     UPDATE servers SET config = ? WHERE id = ?
   `).run(JSON.stringify(newConfig), serverId)
 
-  logger.info({ serverId, config: newConfig }, 'Updated server config')
+  logger.info({ serverId, config: newConfig, modifiedBy }, 'Updated server config')
+}
+
+/**
+ * Get server configuration (returns null if server not found)
+ */
+export function getServerConfig(
+  db: Database,
+  serverDiscordId: string
+): import('../types/index.js').ServerConfig | null {
+  const server = getServerByDiscordId(db, serverDiscordId)
+  return server?.config || null
 }

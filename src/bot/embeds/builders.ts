@@ -192,7 +192,8 @@ export function createCostsEmbed(
   for (const bot of bots) {
     const affordIcon = bot.canAfford ? Emoji.CHECK : Emoji.CROSS
     description += `**${bot.name}** • ${bot.cost.toFixed(1)} ichor ${affordIcon}\n`
-    if (bot.description) {
+    // Only show description if it's different from the name
+    if (bot.description && bot.description !== bot.name) {
       description += `${bot.description}\n`
     }
     description += '\n'
@@ -206,6 +207,51 @@ export function createCostsEmbed(
     footerText += `\n💎 Role discount: ${discountPercent}% off all bots`
   }
   embed.addFields({ name: '\u200B', value: footerText })
+
+  return embed
+}
+
+/**
+ * Create costs embed for all servers (DM view)
+ */
+export function createAllServersCostsEmbed(
+  serverCosts: Array<{
+    serverName: string
+    bots: Array<{ name: string; cost: number }>
+  }>,
+  userBalance: number
+): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setColor(Colors.ICHOR_PURPLE)
+    .setTitle(`${Emoji.COSTS} Bot Costs Across All Servers`)
+    .setTimestamp()
+
+  if (serverCosts.length === 0) {
+    embed.setDescription('No bots have been configured in any servers yet.')
+    return embed
+  }
+
+  for (const server of serverCosts.slice(0, 25)) { // Discord max 25 fields
+    const botList = server.bots
+      .slice(0, 10) // Limit bots per server
+      .map(b => {
+        const affordIcon = userBalance >= b.cost ? Emoji.CHECK : Emoji.CROSS
+        return `• **${b.name}** • ${b.cost.toFixed(1)} ichor ${affordIcon}`
+      })
+      .join('\n')
+
+    const moreText = server.bots.length > 10
+      ? `\n_...and ${server.bots.length - 10} more_`
+      : ''
+
+    embed.addFields({
+      name: server.serverName,
+      value: botList + moreText || 'No bots configured',
+      inline: false,
+    })
+  }
+
+  embed.setFooter({ text: `${Emoji.ICHOR} Your balance: ${userBalance.toFixed(1)} ichor` })
 
   return embed
 }
@@ -311,8 +357,7 @@ export function createInsufficientFundsEmbed(
   botName: string,
   cost: number,
   currentBalance: number,
-  regenRate: number,
-  alternatives: Array<{ name: string; cost: number; canAfford: boolean }>
+  regenRate: number
 ): EmbedBuilder {
   const timeToAfford = Math.ceil((cost - currentBalance) / regenRate * 60)
 
@@ -329,18 +374,6 @@ export function createInsufficientFundsEmbed(
       inline: true,
     })
     .setTimestamp()
-
-  if (alternatives.length > 0) {
-    const altText = alternatives.map(a => {
-      const affordMark = a.canAfford ? ` ${Emoji.CHECK}` : ''
-      return `• **${a.name}** (${a.cost} ichor)${affordMark}`
-    }).join('\n')
-
-    embed.addFields({
-      name: '💡 Cheaper alternatives',
-      value: altText,
-    })
-  }
 
   return embed
 }

@@ -7,16 +7,21 @@
 import {
   type ButtonInteraction,
   type Client,
+  type GuildMemberRoleManager,
   MessageFlags,
 } from 'discord.js'
 import type { Database } from 'better-sqlite3'
-import { getBalance, transferBalance } from '../../services/balance.js'
-import { getOrCreateUser } from '../../services/user.js'
+import { getBalance, transferBalance, getEffectiveRegenRateWithRole } from '../../services/balance.js'
+import { getAllBotCosts, getUserKnownServersCosts } from '../../services/cost.js'
+import { getOrCreateUser, getOrCreateServer } from '../../services/user.js'
+import { updateUserServerRoles } from '../../services/roles.js'
 import {
   createBalanceEmbed,
   createBalanceButtons,
   createHistoryEmbed,
   createPaginationButtons,
+  createCostsEmbed,
+  createAllServersCostsEmbed,
   createTransferSuccessEmbed,
   createTransferReceivedEmbed,
   Emoji,
@@ -39,6 +44,12 @@ export async function handleButton(
 
   // Balance refresh
   if (customId === 'balance_refresh') {
+    await handleBalanceRefresh(interaction, db)
+    return
+  }
+
+  // Balance view (from insufficient funds DM)
+  if (customId === 'balance_view') {
     await handleBalanceRefresh(interaction, db)
     return
   }
@@ -93,15 +104,36 @@ async function handleBalanceRefresh(
     ? Array.from((interaction.member.roles as any).cache?.keys?.() || []).map(String)
     : []
 
+  // Cache user's roles for this server (for global regen rate calculation)
+  if (serverId && userRoles.length > 0) {
+    const server = getOrCreateServer(db, serverId, interaction.guild?.name)
+    updateUserServerRoles(db, user.id, server.id, userRoles)
+  }
+
   const balanceData = getBalance(db, user.id, serverId ?? undefined, userRoles)
 
   const nextRegenAt = balanceData.balance < balanceData.maxBalance
     ? new Date(Date.now() + (1 / balanceData.effectiveRegenRate) * 60 * 60 * 1000)
     : null
 
-  const roleBonus = balanceData.effectiveRegenRate > balanceData.regenRate
-    ? { multiplier: balanceData.effectiveRegenRate / balanceData.regenRate }
-    : undefined
+  // Check for role bonus and look up the role name
+  let roleBonus: { multiplier: number; roleName?: string } | undefined = undefined
+  if (balanceData.effectiveRegenRate > balanceData.regenRate && serverId) {
+    const regenInfo = getEffectiveRegenRateWithRole(db, serverId, userRoles)
+    if (regenInfo.roleId && regenInfo.multiplier > 1) {
+      // Look up the role name from Discord
+      let roleName: string | undefined = undefined
+      const memberRoles = interaction.member?.roles
+      if (memberRoles && 'cache' in memberRoles) {
+        const role = (memberRoles as GuildMemberRoleManager).cache.get(regenInfo.roleId)
+        roleName = role?.name
+      }
+      roleBonus = {
+        multiplier: regenInfo.multiplier,
+        roleName,
+      }
+    }
+  }
 
   const embed = createBalanceEmbed({
     balance: balanceData.balance,
@@ -138,12 +170,68 @@ async function handleHistoryView(
 
 async function handleCostsView(
   interaction: ButtonInteraction,
-  _db: Database
+  db: Database
 ): Promise<void> {
-  // Defer to costs command logic by replying with instructions
-  await interaction.reply({
-    content: `Use \`/costs\` to view bot activation costs.`,
-    flags: MessageFlags.Ephemeral,
+  const user = getOrCreateUser(db, interaction.user.id)
+  const serverId = interaction.guildId
+
+  // In DMs: show costs only from servers the user is known to be in
+  if (!serverId) {
+    const knownServersCosts = getUserKnownServersCosts(db, user.id)
+    const balanceData = getBalance(db, user.id)
+
+    if (knownServersCosts.length === 0) {
+      await interaction.update({
+        content: '❌ No bot costs found. Use `/costs` in a server first to see costs there.',
+        embeds: [],
+        components: [],
+      })
+      return
+    }
+
+    const embed = createAllServersCostsEmbed(knownServersCosts, balanceData.balance)
+
+    await interaction.update({
+      embeds: [embed],
+      components: [], // Remove buttons after showing costs
+    })
+    return
+  }
+
+  // In server: show this server's costs with role discounts
+  // Get user's roles for multipliers
+  const userRoles: string[] = interaction.member
+    ? Array.from((interaction.member.roles as any).cache?.keys?.() || []).map(String)
+    : []
+
+  // Ensure server exists
+  getOrCreateServer(db, serverId)
+
+  // Get balance and costs
+  const balanceData = getBalance(db, user.id, serverId, userRoles)
+  const costs = getAllBotCosts(db, serverId)
+
+  // Apply cost multiplier and check affordability
+  const bots = costs.map(c => {
+    const effectiveCost = Math.round(c.baseCost * balanceData.effectiveCostMultiplier * 100) / 100
+    return {
+      name: c.description || c.botDiscordId,
+      cost: effectiveCost,
+      description: null, // Don't duplicate - it's already in the name
+      canAfford: balanceData.balance >= effectiveCost,
+    }
+  })
+
+  // Calculate discount percentage if applicable
+  const discountPercent = balanceData.effectiveCostMultiplier < 1
+    ? Math.round((1 - balanceData.effectiveCostMultiplier) * 100)
+    : undefined
+
+  const embed = createCostsEmbed(bots, balanceData.balance, discountPercent)
+
+  await interaction.update({
+    embeds: [embed],
+    components: [], // Remove buttons after showing costs
   })
 }
 
@@ -181,9 +269,9 @@ async function handleTransferConfirm(
 
   const sender = getOrCreateUser(db, interaction.user.id)
   const recipient = getOrCreateUser(db, recipientId)
-  const serverId = interaction.guildId
+  const guildId = interaction.guildId
 
-  if (!serverId) {
+  if (!guildId) {
     await interaction.reply({
       content: `${Emoji.CROSS} This action can only be performed in a server.`,
       flags: MessageFlags.Ephemeral,
@@ -191,13 +279,16 @@ async function handleTransferConfirm(
     return
   }
 
+  // Get internal server ID for transaction logging
+  const server = getOrCreateServer(db, guildId)
+
   try {
     const result = transferBalance(
       db,
       sender.id,
       recipient.id,
       amount,
-      serverId,
+      server.id,  // Use internal server UUID, not Discord guild ID
       note
     )
 

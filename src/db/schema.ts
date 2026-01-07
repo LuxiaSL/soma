@@ -72,6 +72,24 @@ CREATE TABLE IF NOT EXISTS tracked_messages (
   expires_at TEXT NOT NULL
 );
 
+-- Reward claims (prevents same user from rewarding same message multiple times)
+CREATE TABLE IF NOT EXISTS reward_claims (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  message_id TEXT NOT NULL,
+  claimed_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, message_id)
+);
+
+-- User server roles cache (tracks which roles users have in which servers)
+-- Used for global regen rate calculation (best role follows you everywhere)
+CREATE TABLE IF NOT EXISTS user_server_roles (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  server_id TEXT NOT NULL REFERENCES servers(id),
+  role_ids TEXT NOT NULL DEFAULT '[]',  -- JSON array of Discord role IDs
+  last_seen TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, server_id)
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_transactions_from_user ON transactions(from_user_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_transactions_to_user ON transactions(to_user_id, timestamp);

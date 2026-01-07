@@ -8,9 +8,11 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import type { Database } from 'better-sqlite3'
 import type { CheckAndDeductRequest, CheckAndDeductResponse } from '../../types/api.js'
+import type { SomaEventBus, InsufficientFundsEvent } from '../../types/events.js'
 import { getBalance, deductBalance } from '../../services/balance.js'
-import { getBotCost, getCheaperAlternatives } from '../../services/cost.js'
+import { getBotCost, getCheaperAlternatives, getBotDescription } from '../../services/cost.js'
 import { getOrCreateUser, getOrCreateServer } from '../../services/user.js'
+import { updateUserServerRoles } from '../../services/roles.js'
 import { ValidationError, InsufficientBalanceError } from '../../utils/errors.js'
 import { logger } from '../../utils/logger.js'
 
@@ -41,6 +43,11 @@ export function createCheckRouter(db: Database): Router {
       const user = getOrCreateUser(db, body.userId)
       const server = getOrCreateServer(db, body.serverId)
 
+      // Cache user's roles for this server (for global regen rate calculation)
+      if (userRoles.length > 0) {
+        updateUserServerRoles(db, user.id, server.id, userRoles)
+      }
+
       // Get bot cost (with role multipliers) - uses Discord IDs for lookups
       const { cost } = getBotCost(db, body.botId, body.serverId, userRoles)
 
@@ -53,8 +60,12 @@ export function createCheckRouter(db: Database): Router {
         const deficit = cost - balanceInfo.balance
         const minutesToAfford = Math.ceil((deficit / balanceInfo.effectiveRegenRate) * 60)
 
-        // Get cheaper alternatives
-        const alternatives = getCheaperAlternatives(db, body.botId, body.serverId, cost)
+        // Get cheaper alternatives and apply user's cost multiplier
+        const baseAlternatives = getCheaperAlternatives(db, body.botId, body.serverId, cost)
+        const alternatives = baseAlternatives.map(alt => ({
+          ...alt,
+          cost: Math.round(alt.cost * balanceInfo.effectiveCostMultiplier * 100) / 100,
+        }))
 
         const response: CheckAndDeductResponse = {
           allowed: false,
@@ -72,6 +83,30 @@ export function createCheckRouter(db: Database): Router {
           balance: balanceInfo.balance,
           triggerType: body.triggerType,
         }, 'Insufficient balance - activation denied')
+
+        // Emit event for Soma bot to send DM notification
+        const eventBus = req.app.get('eventBus') as SomaEventBus | undefined
+        if (eventBus) {
+          const botName = getBotDescription(db, body.botId, body.serverId) || body.botId
+          const insufficientFundsEvent: InsufficientFundsEvent = {
+            userDiscordId: body.userId,
+            serverId: body.serverId,
+            channelId: body.channelId,
+            messageId: body.messageId,
+            botName,
+            botId: body.botId,
+            cost,
+            currentBalance: balanceInfo.balance,
+            regenRate: balanceInfo.effectiveRegenRate,
+            timeToAfford: minutesToAfford,
+            cheaperAlternatives: alternatives.map(a => ({
+              ...a,
+              // Cost is already adjusted - check affordability against adjusted cost
+              canAfford: balanceInfo.balance >= a.cost,
+            })),
+          }
+          eventBus.emit('insufficientFunds', insufficientFundsEvent)
+        }
 
         // Return 200 with allowed: false (not an error, just insufficient funds)
         res.json(response)
@@ -112,7 +147,11 @@ export function createCheckRouter(db: Database): Router {
         if (error instanceof InsufficientBalanceError) {
           // Race condition: balance changed between check and deduct
           // Return insufficient balance response
-          const alternatives = getCheaperAlternatives(db, body.botId, body.serverId, cost)
+          const baseAlternatives = getCheaperAlternatives(db, body.botId, body.serverId, cost)
+          const alternatives = baseAlternatives.map(alt => ({
+            ...alt,
+            cost: Math.round(alt.cost * balanceInfo.effectiveCostMultiplier * 100) / 100,
+          }))
           const response: CheckAndDeductResponse = {
             allowed: false,
             cost,

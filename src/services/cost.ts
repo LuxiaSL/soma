@@ -105,6 +105,134 @@ export function getCheaperAlternatives(
 }
 
 /**
+ * Get a bot's description/name for display
+ */
+export function getBotDescription(
+  db: Database,
+  botDiscordId: string,
+  serverId: string
+): string | null {
+  // First try server-specific cost
+  let row = db.prepare(`
+    SELECT description FROM bot_costs
+    WHERE bot_discord_id = ?
+    AND server_id = (SELECT id FROM servers WHERE discord_id = ?)
+  `).get(botDiscordId, serverId) as { description: string | null } | undefined
+
+  // Fall back to global cost
+  if (!row) {
+    row = db.prepare(`
+      SELECT description FROM bot_costs
+      WHERE bot_discord_id = ? AND server_id IS NULL
+    `).get(botDiscordId) as { description: string | null } | undefined
+  }
+
+  return row?.description || null
+}
+
+/**
+ * Get all bot costs across all servers (for DM view)
+ */
+export function getAllServersCosts(
+  db: Database
+): Array<{
+  serverDiscordId: string
+  serverName: string
+  bots: Array<{ botId: string; name: string; cost: number }>
+}> {
+  // Get all servers with bot costs configured
+  const servers = db.prepare(`
+    SELECT DISTINCT s.id, s.discord_id, s.config
+    FROM servers s
+    INNER JOIN bot_costs bc ON bc.server_id = s.id
+  `).all() as Array<{ id: string; discord_id: string; config: string }>
+
+  const result: Array<{
+    serverDiscordId: string
+    serverName: string
+    bots: Array<{ botId: string; name: string; cost: number }>
+  }> = []
+
+  for (const server of servers) {
+    const config = JSON.parse(server.config || '{}')
+    const serverName = config.name || `Server (ID ...${server.discord_id.slice(-4)})`
+
+    // Get costs for this server (deduped)
+    const costs = db.prepare(`
+      SELECT bot_discord_id, base_cost, description
+      FROM bot_costs
+      WHERE server_id = ?
+      ORDER BY base_cost ASC
+    `).all(server.id) as Array<{ bot_discord_id: string; base_cost: number; description: string | null }>
+
+    if (costs.length > 0) {
+      result.push({
+        serverDiscordId: server.discord_id,
+        serverName,
+        bots: costs.map(c => ({
+          botId: c.bot_discord_id,
+          name: c.description || c.bot_discord_id,
+          cost: c.base_cost,
+        })),
+      })
+    }
+  }
+
+  return result
+}
+
+/**
+ * Get bot costs only from servers the user is known to be in
+ * Uses the user_server_roles cache to determine membership
+ */
+export function getUserKnownServersCosts(
+  db: Database,
+  userId: string  // Internal user ID
+): Array<{
+  serverName: string
+  bots: Array<{ name: string; cost: number }>
+}> {
+  // Get servers the user has been seen in (from role cache)
+  const knownServers = db.prepare(`
+    SELECT DISTINCT usr.server_id, s.discord_id, s.config
+    FROM user_server_roles usr
+    INNER JOIN servers s ON s.id = usr.server_id
+    INNER JOIN bot_costs bc ON bc.server_id = s.id
+    WHERE usr.user_id = ?
+  `).all(userId) as Array<{ server_id: string; discord_id: string; config: string }>
+
+  const result: Array<{
+    serverName: string
+    bots: Array<{ name: string; cost: number }>
+  }> = []
+
+  for (const server of knownServers) {
+    const config = JSON.parse(server.config || '{}')
+    const serverName = config.name || `Server (ID ...${server.discord_id.slice(-4)})`
+
+    // Get costs for this server
+    const costs = db.prepare(`
+      SELECT bot_discord_id, base_cost, description
+      FROM bot_costs
+      WHERE server_id = ?
+      ORDER BY base_cost ASC
+    `).all(server.server_id) as Array<{ bot_discord_id: string; base_cost: number; description: string | null }>
+
+    if (costs.length > 0) {
+      result.push({
+        serverName,
+        bots: costs.map(c => ({
+          name: c.description || c.bot_discord_id,
+          cost: c.base_cost,
+        })),
+      })
+    }
+  }
+
+  return result
+}
+
+/**
  * Set or update a bot's cost
  */
 export function setBotCost(

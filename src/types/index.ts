@@ -28,10 +28,13 @@ export type TriggerType = 'mention' | 'reply' | 'm_continue'
  * Server-specific configuration (rewards, tips)
  */
 export interface ServerConfig {
-  rewardEmoji: string[]
-  rewardAmount: number
-  tipEmoji: string
-  tipAmount: number
+  name?: string              // Discord server name (for display)
+  rewardEmoji: string[]      // Emoji that give rewards (can be multiple)
+  rewardAmount: number       // Ichor per reward reaction
+  tipEmoji: string           // Single emoji for tipping
+  tipAmount: number          // Ichor transferred per tip
+  lastModifiedBy?: string    // Discord user ID who last modified config
+  lastModifiedAt?: string    // ISO timestamp of last modification
 }
 
 /**

@@ -6,12 +6,35 @@
 import type { GlobalConfig, ServerConfig } from '../types/index.js'
 import { DEFAULT_GLOBAL_CONFIG, DEFAULT_SERVER_CONFIG } from '../types/index.js'
 
+/** Cached global config loaded from environment */
+let cachedGlobalConfig: GlobalConfig | null = null
+
 /**
  * Get global configuration
- * For now, returns defaults. Later could be loaded from database.
+ * Loads from environment variables, falling back to defaults
  */
 export function getGlobalConfig(): GlobalConfig {
-  return { ...DEFAULT_GLOBAL_CONFIG }
+  if (cachedGlobalConfig) {
+    return { ...cachedGlobalConfig }
+  }
+
+  const baseRegenRate = parseFloat(process.env.SOMA_BASE_REGEN_RATE || '') 
+  const maxBalance = parseFloat(process.env.SOMA_MAX_BALANCE || '')
+  const startingBalance = parseFloat(process.env.SOMA_STARTING_BALANCE || '')
+
+  cachedGlobalConfig = {
+    baseRegenRate: !isNaN(baseRegenRate) && baseRegenRate > 0 
+      ? baseRegenRate 
+      : DEFAULT_GLOBAL_CONFIG.baseRegenRate,
+    maxBalance: !isNaN(maxBalance) && maxBalance > 0 
+      ? maxBalance 
+      : DEFAULT_GLOBAL_CONFIG.maxBalance,
+    startingBalance: !isNaN(startingBalance) && startingBalance >= 0 
+      ? startingBalance 
+      : DEFAULT_GLOBAL_CONFIG.startingBalance,
+  }
+
+  return { ...cachedGlobalConfig }
 }
 
 /**

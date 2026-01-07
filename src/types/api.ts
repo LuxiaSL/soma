@@ -9,8 +9,9 @@
 export interface CheckAndDeductRequest {
   userId: string           // Discord user ID
   serverId: string         // Discord guild ID (for role multipliers)
+  channelId?: string       // Discord channel ID (for reactions)
   botId: string            // Bot's Discord ID
-  messageId: string        // Triggering message ID
+  messageId?: string       // Triggering message ID
   triggerType: 'mention' | 'reply' | 'm_continue'
   userRoles: string[]      // User's role IDs for cost multipliers
 }

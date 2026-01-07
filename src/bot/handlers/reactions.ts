@@ -15,8 +15,9 @@ import type { Database } from 'better-sqlite3'
 import { getTrackedMessage } from '../../services/tracking.js'
 import { addBalance, transferBalance, getBalance } from '../../services/balance.js'
 import { getOrCreateUser, getServerByDiscordId } from '../../services/user.js'
+import { hasClaimedReward, recordRewardClaim } from '../../services/rewards.js'
 import { createTipReceivedEmbed } from '../embeds/builders.js'
-import { sendDM } from '../notifications/dm.js'
+import { sendDM, createViewMessageButton } from '../notifications/dm.js'
 import { logger } from '../../utils/logger.js'
 
 /** Default reward emoji */
@@ -166,7 +167,7 @@ async function processTip(
     // Build message URL
     const messageUrl = `https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`
 
-    // DM recipient about the tip
+    // DM recipient about the tip with View Message button
     const embed = createTipReceivedEmbed(
       tipper.tag,
       tipAmount,
@@ -175,7 +176,15 @@ async function processTip(
       messageUrl
     )
 
-    const dmSent = await sendDM(recipient, { embeds: [embed] })
+    // Add View Message button if we have the guild/channel/message IDs
+    const viewMessageButton = message.guildId && message.channelId && message.id
+      ? createViewMessageButton(message.guildId, message.channelId, message.id)
+      : undefined
+
+    const dmSent = await sendDM(recipient, {
+      embeds: [embed],
+      components: viewMessageButton ? [viewMessageButton] : [],
+    })
 
     logger.info({
       tipperId: tipper.id,
@@ -203,7 +212,19 @@ async function processReward(
   emoji: string,
   messageId: string
 ): Promise<void> {
-  // Check cooldown
+  // Get reactor's internal user ID for permanent tracking
+  const reactorUser = getOrCreateUser(db, reactor.id)
+
+  // Check if user has already rewarded this message (permanent check)
+  if (hasClaimedReward(db, reactorUser.id, messageId)) {
+    logger.debug({
+      reactorId: reactor.id,
+      messageId,
+    }, 'Reward already claimed for this message')
+    return
+  }
+
+  // Also check rate limit cooldown (prevents spam within same session)
   const cooldownKey = `${reactor.id}:${messageId}`
   const lastReward = rewardCooldowns.get(cooldownKey)
   const now = Date.now()
@@ -221,6 +242,9 @@ async function processReward(
   rewardCooldowns.set(cooldownKey, now)
 
   try {
+    // Record the reward claim permanently (before granting, for atomicity)
+    recordRewardClaim(db, reactorUser.id, messageId)
+
     // Add reward to recipient (rewards are free for the reactor)
     const result = addBalance(
       db,

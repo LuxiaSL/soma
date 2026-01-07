@@ -660,7 +660,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
 | `/transfer` | Send ichor to another user | `recipient` (user), `amount` (number), `note` (string, optional) |
 | `/costs` | View bot activation costs | `server` (optional, for admins) |
 | `/history` | View transaction history | `limit` (number, 1-50) |
-| `/leaderboard` | Top ichor holders | `limit` (number, 5-25) |
+| `/leaderboard` | Top community contributors | `limit` (number, 5-25) |
 
 ### Admin Commands
 

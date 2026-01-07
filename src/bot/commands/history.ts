@@ -70,7 +70,8 @@ export async function executeHistory(
     return {
       type: row.type,
       amount: amount,
-      timestamp: new Date(row.timestamp),
+      // SQLite datetime('now') returns UTC, append 'Z' so JS Date parses it correctly
+      timestamp: new Date(row.timestamp.replace(' ', 'T') + 'Z'),
       description,
     }
   })
@@ -129,10 +130,12 @@ function formatTransactionDescription(
       }
 
     case 'grant':
-      return 'Admin grant'
+      const grantReason = metadata.reason ? ` — ${metadata.reason}` : ''
+      return `Admin grant${grantReason}`
 
     case 'revoke':
-      return 'Admin revoke'
+      const revokeReason = metadata.reason ? ` — ${metadata.reason}` : ''
+      return `Admin revoke${revokeReason}`
 
     case 'refund':
       return 'Refund'
@@ -183,7 +186,8 @@ export function getHistoryPage(
     return {
       type: row.type,
       amount: row.amount,
-      timestamp: new Date(row.timestamp),
+      // SQLite datetime('now') returns UTC, append 'Z' so JS Date parses it correctly
+      timestamp: new Date(row.timestamp.replace(' ', 'T') + 'Z'),
       description: formatTransactionDescription(row.type, isOutgoing, metadata, db),
     }
   })

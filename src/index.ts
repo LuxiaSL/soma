@@ -5,6 +5,7 @@
  */
 
 import 'dotenv/config'
+import { EventEmitter } from 'events'
 
 import { loadConfig } from './config.js'
 import { initDatabase, closeDatabase } from './db/connection.js'
@@ -12,6 +13,7 @@ import { ApiServer } from './api/server.js'
 import { SomaBot } from './bot/index.js'
 import { cleanupExpiredMessages } from './services/tracking.js'
 import { logger } from './utils/logger.js'
+import type { SomaEventBus } from './types/events.js'
 
 async function main(): Promise<void> {
   logger.info('Starting Soma...')
@@ -28,13 +30,17 @@ async function main(): Promise<void> {
   // Initialize database
   const db = initDatabase(config.databasePath)
 
-  // Create API server
-  const server = new ApiServer(config, db)
+  // Create shared event bus for API <-> Bot communication
+  const eventBus = new EventEmitter() as SomaEventBus
+  eventBus.setMaxListeners(20) // Prevent warnings for multiple listeners
+
+  // Create API server (pass eventBus for insufficient funds notifications)
+  const server = new ApiServer(config, db, eventBus)
 
   // Create Discord bot (if token is configured)
   let bot: SomaBot | null = null
   if (config.discordToken) {
-    bot = new SomaBot(db, config.discordToken)
+    bot = new SomaBot(db, config.discordToken, eventBus)
   } else {
     logger.warn('SOMA_DISCORD_TOKEN not set - Discord bot will not start')
   }

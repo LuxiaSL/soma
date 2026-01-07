@@ -10,6 +10,7 @@ import { createTransaction } from './transaction.js'
 import { withTransaction } from '../db/connection.js'
 import { InsufficientBalanceError } from '../utils/errors.js'
 import { logger } from '../utils/logger.js'
+import { getGlobalEffectiveRegenRate } from './roles.js'
 
 /**
  * Calculate regenerated balance based on time elapsed
@@ -39,27 +40,45 @@ export function getEffectiveRegenRate(
   serverId: string,
   userRoles: string[]
 ): number {
+  const { rate } = getEffectiveRegenRateWithRole(db, serverId, userRoles)
+  return rate
+}
+
+/**
+ * Get the effective regen rate along with the role ID that provides it
+ */
+export function getEffectiveRegenRateWithRole(
+  db: Database,
+  serverId: string,
+  userRoles: string[]
+): { rate: number; roleId: string | null; multiplier: number } {
   const globalConfig = getGlobalConfig()
   let multiplier = 1.0
+  let bestRoleId: string | null = null
 
   if (userRoles.length > 0) {
     // Get all role configs for this server that match user's roles
     const placeholders = userRoles.map(() => '?').join(',')
     const roleConfigs = db.prepare(`
-      SELECT regen_multiplier FROM role_configs
+      SELECT role_discord_id, regen_multiplier FROM role_configs
       WHERE server_id = (SELECT id FROM servers WHERE discord_id = ?)
       AND role_discord_id IN (${placeholders})
-    `).all(serverId, ...userRoles) as Pick<RoleConfigRow, 'regen_multiplier'>[]
+    `).all(serverId, ...userRoles) as { role_discord_id: string; regen_multiplier: number }[]
 
-    // Use highest multiplier
+    // Use highest multiplier and track which role provides it
     for (const config of roleConfigs) {
       if (config.regen_multiplier > multiplier) {
         multiplier = config.regen_multiplier
+        bestRoleId = config.role_discord_id
       }
     }
   }
 
-  return globalConfig.baseRegenRate * multiplier
+  return {
+    rate: globalConfig.baseRegenRate * multiplier,
+    roleId: bestRoleId,
+    multiplier,
+  }
 }
 
 /**
@@ -157,9 +176,19 @@ export function getBalance(
   }
 
   const lastRegenAt = new Date(row.last_regen_at)
-  const effectiveRegenRate = serverId
-    ? getEffectiveRegenRate(db, serverId, userRoles)
-    : globalConfig.baseRegenRate
+  
+  // For regen rate: use server context if available, otherwise check global cached roles
+  // This implements "best role follows you everywhere"
+  let effectiveRegenRate: number
+  if (serverId) {
+    effectiveRegenRate = getEffectiveRegenRate(db, serverId, userRoles)
+  } else {
+    // No server context (DMs, API) - use global cached roles
+    const globalRegen = getGlobalEffectiveRegenRate(db, userId)
+    effectiveRegenRate = globalRegen.rate
+  }
+
+  // Max balance and cost multiplier remain server-specific
   const effectiveMaxBalance = serverId
     ? getEffectiveMaxBalance(db, serverId, userRoles)
     : globalConfig.maxBalance
@@ -290,7 +319,7 @@ export function addBalance(
   userId: string,
   amount: number,
   serverId: string | null,
-  type: 'grant' | 'reward' | 'tip' | 'transfer',
+  type: 'grant' | 'reward' | 'tip' | 'transfer' | 'revoke',
   metadata?: Record<string, unknown>
 ): { balanceAfter: number; transactionId: string } {
   return withTransaction(db, () => {

@@ -5,13 +5,15 @@
  * - User commands (/balance, /transfer, /costs, /history)
  * - Admin commands (/soma grant, /soma set-cost, etc.)
  * - Reaction watching for rewards and tips
- * - DM notifications
+ * - DM notifications (including insufficient funds from API)
  */
 
 import { Client, GatewayIntentBits, Partials, Events, ActivityType } from 'discord.js'
 import type { Database } from 'better-sqlite3'
+import type { SomaEventBus } from '../types/events.js'
 import { registerCommands, handleInteraction } from './commands/index.js'
 import { handleReactionAdd } from './handlers/reactions.js'
+import { setupNotificationHandlers } from './handlers/notifications.js'
 import { logger } from '../utils/logger.js'
 
 /** Discord intents and partials needed for Soma bot functionality */
@@ -22,6 +24,7 @@ const CLIENT_OPTIONS = {
     GatewayIntentBits.GuildMessageReactions, // Watch reactions
     GatewayIntentBits.GuildMembers,         // Get member roles for multipliers
     GatewayIntentBits.DirectMessages,       // Send DM notifications
+    GatewayIntentBits.MessageContent,       // Read message content (privileged)
   ],
   partials: [
     Partials.Message,   // Reactions on uncached messages
@@ -34,10 +37,12 @@ export class SomaBot {
   private client: Client
   private db: Database
   private token: string
+  private eventBus?: SomaEventBus
 
-  constructor(db: Database, token: string) {
+  constructor(db: Database, token: string, eventBus?: SomaEventBus) {
     this.db = db
     this.token = token
+    this.eventBus = eventBus
     this.client = new Client(CLIENT_OPTIONS)
 
     this.setupEventHandlers()
@@ -53,6 +58,11 @@ export class SomaBot {
 
       // Set activity
       readyClient.user.setActivity('your ichor balance', { type: ActivityType.Watching })
+
+      // Set up notification handlers for API events (insufficient funds, etc.)
+      if (this.eventBus) {
+        setupNotificationHandlers(this.eventBus, this.client)
+      }
     })
 
     // Interaction events (commands, buttons, modals)

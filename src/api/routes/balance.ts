@@ -7,8 +7,9 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import type { Database } from 'better-sqlite3'
 import type { GetBalanceResponse } from '../../types/api.js'
 import { getBalance } from '../../services/balance.js'
-import { getOrCreateUser } from '../../services/user.js'
+import { getOrCreateUser, getOrCreateServer } from '../../services/user.js'
 import { getGlobalConfig } from '../../services/config.js'
+import { updateUserServerRoles } from '../../services/roles.js'
 
 export function createBalanceRouter(db: Database): Router {
   const router = Router()
@@ -23,7 +24,13 @@ export function createBalanceRouter(db: Database): Router {
       // Ensure user exists
       const user = getOrCreateUser(db, userId)
 
-      // Get balance with regen
+      // Cache user roles if server context is provided
+      if (serverId && userRoles.length > 0) {
+        const server = getOrCreateServer(db, serverId)
+        updateUserServerRoles(db, user.id, server.id, userRoles)
+      }
+
+      // Get balance with regen (uses cached roles globally if no server context)
       const balanceInfo = getBalance(db, user.id, serverId, userRoles)
       const globalConfig = getGlobalConfig()
 
@@ -40,12 +47,10 @@ export function createBalanceRouter(db: Database): Router {
         maxBalance: balanceInfo.maxBalance,
         regenRate: globalConfig.baseRegenRate,
         nextRegenAt: nextRegenAt?.toISOString() ?? null,
-      }
-
-      // Include effective rates if server context provided
-      if (serverId) {
-        response.effectiveRegenRate = balanceInfo.effectiveRegenRate
-        response.effectiveCostMultiplier = balanceInfo.effectiveCostMultiplier
+        // Always include effective regen rate (uses cached roles globally)
+        effectiveRegenRate: balanceInfo.effectiveRegenRate,
+        // Cost multiplier only makes sense in server context
+        effectiveCostMultiplier: serverId ? balanceInfo.effectiveCostMultiplier : 1.0,
       }
 
       res.json(response)

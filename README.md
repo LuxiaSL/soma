@@ -44,7 +44,7 @@ npm install
 Copy the example environment file and configure it:
 
 ```bash
-cp env.example .env
+cp .env.example .env
 ```
 
 Edit `.env` with your settings:
@@ -94,6 +94,11 @@ npm start
 | `SOMA_DISCORD_TOKEN` | ❌ No | - | Discord bot token for commands/reactions |
 | `SOMA_PORT` | ❌ No | `3100` | API server port |
 | `SOMA_DATABASE_PATH` | ❌ No | `./data/soma.db` | SQLite database path |
+| `SOMA_ADMIN_ROLES` | ❌ No | - | Comma-separated Discord role IDs for admin access |
+| `SOMA_DEV_GUILD_ID` | ❌ No | - | Guild ID for instant command registration (dev only) |
+| `SOMA_BASE_REGEN_RATE` | ❌ No | `5` | Ichor regenerated per hour (global) |
+| `SOMA_MAX_BALANCE` | ❌ No | `100` | Maximum ichor balance cap (global) |
+| `SOMA_STARTING_BALANCE` | ❌ No | `50` | Initial ichor for new users (global) |
 | `LOG_LEVEL` | ❌ No | `info` | Log level: debug, info, warn, error |
 | `NODE_ENV` | ❌ No | `development` | Environment mode |
 
@@ -102,7 +107,7 @@ npm start
 See **[DISCORD_BOT_SETUP.md](./DISCORD_BOT_SETUP.md)** for detailed instructions on:
 
 1. Creating a Discord application
-2. Enabling required intents (Server Members)
+2. Enabling required intents (Server Members, Message Content)
 3. Generating an invite link with permissions
 4. Getting and securing your bot token
 
@@ -118,17 +123,28 @@ See **[DISCORD_BOT_SETUP.md](./DISCORD_BOT_SETUP.md)** for detailed instructions
 | `/transfer @user 10` | Send 10 ichor to a friend |
 | `/costs` | See what each bot costs |
 | `/history` | View your recent transactions |
+| `/leaderboard` | View top community contributors (by tips/reactions received) |
 
-When you ping a bot, ichor is automatically deducted. If you don't have enough, you'll receive a notification.
+When you ping a bot, ichor is automatically deducted. If you don't have enough, you'll receive a DM notification with details.
 
 ### For Admins
+
+Requires **Administrator** permission or a role in `SOMA_ADMIN_ROLES`.
 
 | Command | Description |
 |---------|-------------|
 | `/soma grant @user 50` | Give someone ichor |
+| `/soma revoke @user 10` | Remove ichor from a user |
 | `/soma set-cost @Bot 15` | Set a bot's activation cost |
 | `/soma set-role @Patron` | Configure role multipliers |
 | `/soma stats` | View server statistics |
+| `/soma update-user @user` | Force refresh a user's role cache |
+| `/soma config-view` | View current server configuration |
+| `/soma config-rewards-emoji ⭐ 🔥` | Set reward emoji (one or more) |
+| `/soma config-rewards-amount 2` | Set ichor per reward reaction |
+| `/soma config-tip-emoji 🫀` | Set tip emoji (supports custom!) |
+| `/soma config-tip-amount 10` | Set ichor per tip |
+| `/soma config-reset` | Reset config to defaults |
 
 ---
 
@@ -164,7 +180,16 @@ Authorization: Bearer <your-service-token>
 | `POST` | `/track-message` | Track a bot message for reactions |
 | `GET` | `/history/:userId/:serverId` | Get transaction history |
 
-See **[SPEC.md](./SPEC.md)** for complete API documentation.
+### Admin Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/admin/grant` | Grant ichor to a user |
+| `POST` | `/admin/set-cost` | Configure bot cost |
+| `POST` | `/admin/set-role` | Configure role multipliers |
+| `POST` | `/admin/configure` | Server configuration |
+
+See **[DOCUMENTATION.md](./DOCUMENTATION.md)** for complete API documentation.
 
 ---
 
@@ -206,10 +231,15 @@ Soma consists of two components:
 
 ### Earning Ichor
 
-- **Regeneration**: Ichor slowly refills over time (default: 5/hour)
-- **Rewards**: When others react (⭐🔥💯👏) to bot messages you triggered
-- **Tips**: Others can react with 🫀 to tip you ichor
+- **Regeneration**: Ichor slowly refills over time (configurable, default: 5/hour)
+- **Rewards**: When others react to bot messages you triggered (emoji configurable per-server)
+- **Tips**: Others can tip you ichor via reaction (emoji configurable per-server)
 - **Transfers**: Others can send you ichor with `/transfer`
+- **Admin Grants**: Server admins can grant ichor to users
+
+### Server Configuration
+
+Admins can customize reward/tip emoji and amounts per-server using `/soma config-*` commands. This allows using **custom server emoji** for rewards and tips! Configuration is tracked with who last modified it.
 
 ### Global Balance
 
@@ -224,19 +254,20 @@ Your ichor balance is **shared across all servers**. Role-based discounts still 
 ```
 soma/
 ├── src/
-│   ├── api/          # REST API routes and middleware
-│   │   ├── routes/   # Endpoint handlers
-│   │   └── middleware/
-│   ├── bot/          # Discord bot
-│   │   ├── commands/ # Slash commands
-│   │   ├── handlers/ # Reactions, buttons
-│   │   └── embeds/   # Rich embed builders
-│   ├── db/           # Database connection and schema
-│   ├── services/     # Business logic
-│   ├── types/        # TypeScript types
-│   └── utils/        # Logger, errors
-├── data/             # SQLite database (gitignored)
-├── dist/             # Compiled output (gitignored)
+│   ├── api/              # REST API routes and middleware
+│   │   ├── routes/       # Endpoint handlers
+│   │   └── middleware/   # Auth middleware
+│   ├── bot/              # Discord bot
+│   │   ├── commands/     # Slash commands
+│   │   ├── handlers/     # Reactions, buttons, notifications
+│   │   ├── notifications/# DM notification helpers
+│   │   └── embeds/       # Rich embed builders
+│   ├── db/               # Database connection and schema
+│   ├── services/         # Business logic
+│   ├── types/            # TypeScript types
+│   └── utils/            # Logger, errors
+├── data/                 # SQLite database (gitignored)
+├── dist/                 # Compiled output (gitignored)
 └── ...
 ```
 
@@ -263,6 +294,8 @@ Tables:
 - `role_configs` - Role multipliers
 - `transactions` - Full audit log
 - `tracked_messages` - Messages to watch for reactions
+- `reward_claims` - Prevents duplicate reward claims
+- `user_server_roles` - Cached user roles for global regen calculation
 
 ---
 
@@ -270,7 +303,8 @@ Tables:
 
 | Document | Description |
 |----------|-------------|
-| [SPEC.md](./SPEC.md) | Full technical specification |
+| [DOCUMENTATION.md](./DOCUMENTATION.md) | **Complete reference documentation** |
+| [SPEC.md](./SPEC.md) | Technical specification |
 | [BOT_DESIGN.md](./BOT_DESIGN.md) | Discord bot UX design |
 | [DISCORD_CAPABILITIES.md](./DISCORD_CAPABILITIES.md) | Discord API research |
 | [DISCORD_BOT_SETUP.md](./DISCORD_BOT_SETUP.md) | Bot creation guide |
