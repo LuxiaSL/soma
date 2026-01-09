@@ -15,7 +15,7 @@ import {
 } from 'discord.js'
 import type { Database } from 'better-sqlite3'
 import { getBalance } from '../../services/balance.js'
-import { getOrCreateUser } from '../../services/user.js'
+import { getOrCreateUser, extractDiscordUserInfo } from '../../services/user.js'
 import { createTransferConfirmEmbed, Emoji } from '../embeds/builders.js'
 import { logger } from '../../utils/logger.js'
 
@@ -66,8 +66,8 @@ export async function executeTransfer(
     return
   }
 
-  // Ensure sender exists
-  const sender = getOrCreateUser(db, interaction.user.id)
+  // Ensure sender exists and cache their profile
+  const sender = getOrCreateUser(db, interaction.user.id, extractDiscordUserInfo(interaction.user))
 
   // Check sender balance
   const balanceData = getBalance(db, sender.id)

@@ -11,7 +11,7 @@ import {
 } from 'discord.js'
 import type { Database } from 'better-sqlite3'
 import type { TransactionRow } from '../../types/index.js'
-import { getOrCreateUser, getOrCreateServer } from '../../services/user.js'
+import { getOrCreateUser, getOrCreateServer, extractDiscordUserInfo } from '../../services/user.js'
 import { createHistoryEmbed, createPaginationButtons } from '../embeds/builders.js'
 import { logger } from '../../utils/logger.js'
 
@@ -34,8 +34,8 @@ export async function executeHistory(
   const limit = interaction.options.getInteger('limit') || ITEMS_PER_PAGE
   const serverId = interaction.guildId
 
-  // Ensure user exists
-  const user = getOrCreateUser(db, interaction.user.id)
+  // Ensure user exists and cache their profile
+  const user = getOrCreateUser(db, interaction.user.id, extractDiscordUserInfo(interaction.user))
 
   // Ensure server exists if in a guild
   if (serverId) {

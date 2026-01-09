@@ -6,6 +6,7 @@ import Database from 'better-sqlite3'
 import { existsSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
 import { SCHEMA } from './schema.js'
+import { runMigrations } from './migrations.js'
 import { logger } from '../utils/logger.js'
 import { DatabaseError } from '../utils/errors.js'
 
@@ -33,6 +34,9 @@ export function initDatabase(dbPath: string): Database.Database {
 
     // Create schema
     db.exec(SCHEMA)
+
+    // Run any pending migrations
+    runMigrations(db)
 
     logger.info({ dbPath }, 'Database initialized')
 

@@ -9,6 +9,10 @@
 export interface UserRow {
   id: string           // UUID
   discord_id: string   // Discord user ID
+  username: string | null      // Discord username (cached)
+  display_name: string | null  // Discord display name (cached)
+  avatar_hash: string | null   // Discord avatar hash (cached)
+  last_seen: string | null     // ISO timestamp of last interaction
   created_at: string   // ISO timestamp
 }
 
@@ -90,6 +94,10 @@ export interface TrackedMessageRow {
 export interface User {
   id: string
   discordId: string
+  username: string | null
+  displayName: string | null
+  avatarHash: string | null
+  lastSeen: Date | null
   createdAt: Date
 }
 

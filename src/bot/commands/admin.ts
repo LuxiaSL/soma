@@ -15,6 +15,7 @@ import type { Database } from 'better-sqlite3'
 import { addBalance } from '../../services/balance.js'
 import { getOrCreateUser, getOrCreateServer, updateServerConfig } from '../../services/user.js'
 import { updateUserServerRoles, getGlobalEffectiveRegenRate, hasGlobalAdminRole, isAdminUserId } from '../../services/roles.js'
+import { extractDiscordUserInfo } from '../../services/user.js'
 import { generateId } from '../../db/connection.js'
 import { createGrantEmbed, Emoji, Colors } from '../embeds/builders.js'
 import { EmbedBuilder } from 'discord.js'
@@ -124,40 +125,51 @@ export const somaAdminCommand = new SlashCommandBuilder()
 
 /**
  * Check if user has admin access
- * Checks: SOMA_ADMIN_USERS (user IDs), then SOMA_ADMIN_ROLES (role IDs)
+ * Any of these conditions grants admin access (OR logic):
+ * 1. User ID is in SOMA_ADMIN_USERS
+ * 2. User has a role in SOMA_ADMIN_ROLES
+ * 3. User has Discord Administrator permission (always works as a shortcut)
+ * 
  * Works in both server context (checks current roles) and DMs (checks cached roles)
  */
 function hasAdminRole(interaction: ChatInputCommandInteraction, db: Database): boolean {
-  // First check if user ID is in admin users list
+  // Check if user has Discord Administrator permission (always a valid shortcut)
+  if (interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+    return true
+  }
+
+  // Check if user ID is in admin users list
   if (isAdminUserId(interaction.user.id)) {
     return true
   }
 
+  // Check admin roles if configured
   const adminRoleIds = process.env.SOMA_ADMIN_ROLES?.split(',').map(r => r.trim()).filter(Boolean) || []
-  
-  // If no admin roles configured, fall back to Discord's Administrator permission
-  if (adminRoleIds.length === 0) {
-    return true // Let Discord's setDefaultMemberPermissions handle it
-  }
+  if (adminRoleIds.length > 0) {
+    // In server context, check current roles
+    const memberRoles = interaction.member?.roles
+    if (memberRoles) {
+      // Handle both GuildMemberRoleManager (has cache) and string[] (API response)
+      if ('cache' in memberRoles) {
+        if (memberRoles.cache.some(role => adminRoleIds.includes(role.id))) {
+          return true
+        }
+      } else if (Array.isArray(memberRoles)) {
+        if (memberRoles.some(roleId => adminRoleIds.includes(roleId))) {
+          return true
+        }
+      }
+    }
 
-  // In server context, check current roles
-  const memberRoles = interaction.member?.roles
-  if (memberRoles) {
-    // Handle both GuildMemberRoleManager (has cache) and string[] (API response)
-    if ('cache' in memberRoles) {
-      if (memberRoles.cache.some(role => adminRoleIds.includes(role.id))) {
-        return true
-      }
-    } else if (Array.isArray(memberRoles)) {
-      if (memberRoles.some(roleId => adminRoleIds.includes(roleId))) {
-        return true
-      }
+    // In DMs or as fallback, check global cached roles
+    const user = getOrCreateUser(db, interaction.user.id)
+    if (hasGlobalAdminRole(db, user.id)) {
+      return true
     }
   }
 
-  // In DMs or as fallback, check global cached roles
-  const user = getOrCreateUser(db, interaction.user.id)
-  return hasGlobalAdminRole(db, user.id)
+  // User doesn't match any admin criteria
+  return false
 }
 
 export async function executeSomaAdmin(
@@ -236,8 +248,8 @@ async function executeGrant(
   const reason = interaction.options.getString('reason')
   const serverId = interaction.guildId
 
-  // Ensure user exists
-  const user = getOrCreateUser(db, targetUser.id)
+  // Ensure user exists and cache their profile
+  const user = getOrCreateUser(db, targetUser.id, extractDiscordUserInfo(targetUser))
   
   // Get server if in guild context, otherwise null (for DM grants)
   const server = serverId 
@@ -276,8 +288,8 @@ async function executeRevoke(
   const reason = interaction.options.getString('reason')
   const serverId = interaction.guildId
 
-  // Ensure user exists
-  const user = getOrCreateUser(db, targetUser.id)
+  // Ensure user exists and cache their profile
+  const user = getOrCreateUser(db, targetUser.id, extractDiscordUserInfo(targetUser))
   
   // Get server if in guild context, otherwise null (for DM revokes)
   const server = serverId 
@@ -593,8 +605,8 @@ async function executeUpdateUser(
     // Get role IDs
     const roleIds = Array.from(member.roles.cache.keys())
 
-    // Ensure user and server exist
-    const user = getOrCreateUser(db, targetUser.id)
+    // Ensure user and server exist, cache their profile
+    const user = getOrCreateUser(db, targetUser.id, extractDiscordUserInfo(targetUser))
     const server = getOrCreateServer(db, serverId, interaction.guild?.name)
 
     // Update the role cache

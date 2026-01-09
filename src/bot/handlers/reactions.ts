@@ -14,7 +14,7 @@ import {
 import type { Database } from 'better-sqlite3'
 import { getTrackedMessage } from '../../services/tracking.js'
 import { addBalance, transferBalance, getBalance } from '../../services/balance.js'
-import { getOrCreateUser, getServerByDiscordId } from '../../services/user.js'
+import { getOrCreateUser, getServerByDiscordId, extractDiscordUserInfo } from '../../services/user.js'
 import { hasClaimedReward, recordRewardClaim } from '../../services/rewards.js'
 import { createTipReceivedEmbed } from '../embeds/builders.js'
 import { sendDM, createViewMessageButton } from '../notifications/dm.js'
@@ -135,8 +135,8 @@ async function processTip(
   tipAmount: number,
   message: any
 ): Promise<void> {
-  // Ensure tipper exists
-  const tipperUser = getOrCreateUser(db, tipper.id)
+  // Ensure tipper exists and cache their profile
+  const tipperUser = getOrCreateUser(db, tipper.id, extractDiscordUserInfo(tipper))
 
   // Check tipper has enough balance
   const tipperBalance = getBalance(db, tipperUser.id)
@@ -212,8 +212,8 @@ async function processReward(
   emoji: string,
   messageId: string
 ): Promise<void> {
-  // Get reactor's internal user ID for permanent tracking
-  const reactorUser = getOrCreateUser(db, reactor.id)
+  // Get reactor's internal user ID for permanent tracking and cache their profile
+  const reactorUser = getOrCreateUser(db, reactor.id, extractDiscordUserInfo(reactor))
 
   // Check if user has already rewarded this message (permanent check)
   if (hasClaimedReward(db, reactorUser.id, messageId)) {

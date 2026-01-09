@@ -12,7 +12,7 @@ import {
 } from 'discord.js'
 import type { Database } from 'better-sqlite3'
 import { getBalance, getEffectiveRegenRateWithRole } from '../../services/balance.js'
-import { getOrCreateUser, getOrCreateServer } from '../../services/user.js'
+import { getOrCreateUser, getOrCreateServer, extractDiscordUserInfo } from '../../services/user.js'
 import { updateUserServerRoles } from '../../services/roles.js'
 import { createBalanceEmbed, createBalanceButtons } from '../embeds/builders.js'
 import { logger } from '../../utils/logger.js'
@@ -28,8 +28,8 @@ export async function executeBalance(
   const userId = interaction.user.id
   const serverId = interaction.guildId
 
-  // Ensure user exists
-  const user = getOrCreateUser(db, userId)
+  // Ensure user exists and cache their profile info
+  const user = getOrCreateUser(db, userId, extractDiscordUserInfo(interaction.user))
 
   // Get user's roles for multipliers
   const userRoles: string[] = interaction.member

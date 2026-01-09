@@ -13,6 +13,7 @@ import {
 } from 'discord.js'
 import type { Database } from 'better-sqlite3'
 import { Colors, Emoji } from '../embeds/builders.js'
+import { getOrCreateUser, extractDiscordUserInfo } from '../../services/user.js'
 import { logger } from '../../utils/logger.js'
 
 export const leaderboardCommand = new SlashCommandBuilder()
@@ -143,6 +144,9 @@ export async function executeLeaderboard(
   db: Database
 ): Promise<void> {
   const limit = interaction.options.getInteger('limit') ?? 10
+
+  // Cache the user's profile info
+  getOrCreateUser(db, interaction.user.id, extractDiscordUserInfo(interaction.user))
 
   try {
     const topEntries = getTopLeaderboard(db, limit)

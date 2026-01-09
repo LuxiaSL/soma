@@ -12,7 +12,7 @@ import {
 import type { Database } from 'better-sqlite3'
 import { getBalance, getEffectiveCostMultiplier } from '../../services/balance.js'
 import { getAllBotCosts, getUserKnownServersCosts } from '../../services/cost.js'
-import { getOrCreateUser, getOrCreateServer } from '../../services/user.js'
+import { getOrCreateUser, getOrCreateServer, extractDiscordUserInfo } from '../../services/user.js'
 import { createCostsEmbed, createAllServersCostsEmbed } from '../embeds/builders.js'
 import { logger } from '../../utils/logger.js'
 
@@ -32,8 +32,8 @@ export async function executeCosts(
   const serverId = interaction.guildId
   const specificBot = interaction.options.getString('bot')
 
-  // Ensure user exists
-  const user = getOrCreateUser(db, interaction.user.id)
+  // Ensure user exists and cache their profile
+  const user = getOrCreateUser(db, interaction.user.id, extractDiscordUserInfo(interaction.user))
 
   // In DMs: show costs from all servers the user is known to be in
   if (!serverId) {

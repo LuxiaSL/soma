@@ -23,6 +23,7 @@ import { createHistoryRouter } from './routes/history.js'
 import { createAdminRouter } from './routes/admin.js'
 import { createRefundRouter } from './routes/refund.js'
 import { createTrackingRouter } from './routes/tracking.js'
+import { createLeaderboardRoutes } from './routes/leaderboard.js'
 
 export class ApiServer {
   private app: Express
@@ -98,6 +99,7 @@ export class ApiServer {
     this.app.use(v1, createRefundRouter(this.db))
     this.app.use(v1, createTrackingRouter(this.db))
     this.app.use(v1, createAdminRouter(this.db))
+    this.app.use(`${v1}/leaderboard`, createLeaderboardRoutes(this.db))
 
     // 404 handler
     this.app.use((req: Request, res: Response) => {

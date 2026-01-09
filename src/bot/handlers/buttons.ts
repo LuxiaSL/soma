@@ -13,7 +13,7 @@ import {
 import type { Database } from 'better-sqlite3'
 import { getBalance, transferBalance, getEffectiveRegenRateWithRole } from '../../services/balance.js'
 import { getAllBotCosts, getUserKnownServersCosts } from '../../services/cost.js'
-import { getOrCreateUser, getOrCreateServer } from '../../services/user.js'
+import { getOrCreateUser, getOrCreateServer, extractDiscordUserInfo } from '../../services/user.js'
 import { updateUserServerRoles } from '../../services/roles.js'
 import {
   createBalanceEmbed,
@@ -96,7 +96,7 @@ async function handleBalanceRefresh(
   interaction: ButtonInteraction,
   db: Database
 ): Promise<void> {
-  const user = getOrCreateUser(db, interaction.user.id)
+  const user = getOrCreateUser(db, interaction.user.id, extractDiscordUserInfo(interaction.user))
   const serverId = interaction.guildId
 
   // Get user's roles for multipliers
@@ -156,7 +156,7 @@ async function handleHistoryView(
   interaction: ButtonInteraction,
   db: Database
 ): Promise<void> {
-  const user = getOrCreateUser(db, interaction.user.id)
+  const user = getOrCreateUser(db, interaction.user.id, extractDiscordUserInfo(interaction.user))
   const { transactions, totalPages } = getHistoryPage(db, user.id, 0)
 
   const embed = createHistoryEmbed(transactions, 0, totalPages)
@@ -172,7 +172,7 @@ async function handleCostsView(
   interaction: ButtonInteraction,
   db: Database
 ): Promise<void> {
-  const user = getOrCreateUser(db, interaction.user.id)
+  const user = getOrCreateUser(db, interaction.user.id, extractDiscordUserInfo(interaction.user))
   const serverId = interaction.guildId
 
   // In DMs: show costs only from servers the user is known to be in
@@ -244,7 +244,7 @@ async function handleHistoryPagination(
   const currentPage = parseInt(customId.split('_')[2])
   const newPage = currentPage + direction
 
-  const user = getOrCreateUser(db, interaction.user.id)
+  const user = getOrCreateUser(db, interaction.user.id, extractDiscordUserInfo(interaction.user))
   const { transactions, totalPages } = getHistoryPage(db, user.id, newPage)
 
   const embed = createHistoryEmbed(transactions, newPage, totalPages)
@@ -267,7 +267,8 @@ async function handleTransferConfirm(
   const amount = parseFloat(parts[3])
   const note = parts[4] ? decodeURIComponent(parts.slice(4).join('_')) : undefined
 
-  const sender = getOrCreateUser(db, interaction.user.id)
+  const sender = getOrCreateUser(db, interaction.user.id, extractDiscordUserInfo(interaction.user))
+  // Recipient info will be updated when they interact with the bot
   const recipient = getOrCreateUser(db, recipientId)
   const guildId = interaction.guildId
 

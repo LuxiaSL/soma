@@ -7,6 +7,10 @@ export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   discord_id TEXT UNIQUE NOT NULL,
+  username TEXT,
+  display_name TEXT,
+  avatar_hash TEXT,
+  last_seen TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 

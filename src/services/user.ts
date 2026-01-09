@@ -11,20 +11,83 @@ import { getGlobalConfig } from './config.js'
 import { logger } from '../utils/logger.js'
 
 /**
- * Get or create a user by Discord ID
+ * Discord user profile info for caching
  */
-export function getOrCreateUser(db: Database, discordId: string): User {
+export interface DiscordUserInfo {
+  username: string
+  displayName?: string
+  avatarHash?: string | null
+}
+
+/**
+ * Extract user info from a Discord.js User object
+ */
+export function extractDiscordUserInfo(discordUser: { 
+  username: string
+  displayName?: string
+  globalName?: string | null
+  avatar?: string | null 
+}): DiscordUserInfo {
+  return {
+    username: discordUser.username,
+    displayName: discordUser.displayName ?? discordUser.globalName ?? undefined,
+    avatarHash: discordUser.avatar ?? null,
+  }
+}
+
+/**
+ * Parse a UserRow into a User domain object
+ */
+function parseUserRow(row: UserRow): User {
+  return {
+    id: row.id,
+    discordId: row.discord_id,
+    username: row.username,
+    displayName: row.display_name,
+    avatarHash: row.avatar_hash,
+    lastSeen: row.last_seen ? new Date(row.last_seen) : null,
+    createdAt: new Date(row.created_at),
+  }
+}
+
+/**
+ * Get or create a user by Discord ID
+ * Optionally updates cached profile info if provided
+ */
+export function getOrCreateUser(db: Database, discordId: string, userInfo?: DiscordUserInfo): User {
   // Try to find existing user
   const existing = db.prepare(`
-    SELECT id, discord_id, created_at FROM users WHERE discord_id = ?
+    SELECT id, discord_id, username, display_name, avatar_hash, last_seen, created_at 
+    FROM users WHERE discord_id = ?
   `).get(discordId) as UserRow | undefined
 
   if (existing) {
-    return {
-      id: existing.id,
-      discordId: existing.discord_id,
-      createdAt: new Date(existing.created_at),
+    // Update cached profile info if provided
+    if (userInfo) {
+      db.prepare(`
+        UPDATE users SET 
+          username = ?,
+          display_name = ?,
+          avatar_hash = ?,
+          last_seen = datetime('now')
+        WHERE id = ?
+      `).run(
+        userInfo.username,
+        userInfo.displayName ?? null,
+        userInfo.avatarHash ?? null,
+        existing.id
+      )
+      
+      return {
+        ...parseUserRow(existing),
+        username: userInfo.username,
+        displayName: userInfo.displayName ?? null,
+        avatarHash: userInfo.avatarHash ?? null,
+        lastSeen: new Date(),
+      }
     }
+    
+    return parseUserRow(existing)
   }
 
   // Create new user
@@ -32,21 +95,51 @@ export function getOrCreateUser(db: Database, discordId: string): User {
   const globalConfig = getGlobalConfig()
 
   db.prepare(`
-    INSERT INTO users (id, discord_id) VALUES (?, ?)
-  `).run(id, discordId)
+    INSERT INTO users (id, discord_id, username, display_name, avatar_hash, last_seen) 
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+  `).run(
+    id, 
+    discordId, 
+    userInfo?.username ?? null,
+    userInfo?.displayName ?? null,
+    userInfo?.avatarHash ?? null
+  )
 
   // Create initial balance
   db.prepare(`
     INSERT INTO balances (user_id, amount) VALUES (?, ?)
   `).run(id, globalConfig.startingBalance)
 
-  logger.info({ discordId, id, startingBalance: globalConfig.startingBalance }, 'Created new user')
+  logger.info({ discordId, id, username: userInfo?.username, startingBalance: globalConfig.startingBalance }, 'Created new user')
 
   return {
     id,
     discordId,
+    username: userInfo?.username ?? null,
+    displayName: userInfo?.displayName ?? null,
+    avatarHash: userInfo?.avatarHash ?? null,
+    lastSeen: new Date(),
     createdAt: new Date(),
   }
+}
+
+/**
+ * Update a user's cached profile info
+ */
+export function updateUserProfile(db: Database, discordId: string, userInfo: DiscordUserInfo): void {
+  db.prepare(`
+    UPDATE users SET 
+      username = ?,
+      display_name = ?,
+      avatar_hash = ?,
+      last_seen = datetime('now')
+    WHERE discord_id = ?
+  `).run(
+    userInfo.username,
+    userInfo.displayName ?? null,
+    userInfo.avatarHash ?? null,
+    discordId
+  )
 }
 
 /**
@@ -54,18 +147,15 @@ export function getOrCreateUser(db: Database, discordId: string): User {
  */
 export function getUserByDiscordId(db: Database, discordId: string): User | null {
   const row = db.prepare(`
-    SELECT id, discord_id, created_at FROM users WHERE discord_id = ?
+    SELECT id, discord_id, username, display_name, avatar_hash, last_seen, created_at 
+    FROM users WHERE discord_id = ?
   `).get(discordId) as UserRow | undefined
 
   if (!row) {
     return null
   }
 
-  return {
-    id: row.id,
-    discordId: row.discord_id,
-    createdAt: new Date(row.created_at),
-  }
+  return parseUserRow(row)
 }
 
 /**
@@ -73,18 +163,15 @@ export function getUserByDiscordId(db: Database, discordId: string): User | null
  */
 export function getUserById(db: Database, id: string): User | null {
   const row = db.prepare(`
-    SELECT id, discord_id, created_at FROM users WHERE id = ?
+    SELECT id, discord_id, username, display_name, avatar_hash, last_seen, created_at 
+    FROM users WHERE id = ?
   `).get(id) as UserRow | undefined
 
   if (!row) {
     return null
   }
 
-  return {
-    id: row.id,
-    discordId: row.discord_id,
-    createdAt: new Date(row.created_at),
-  }
+  return parseUserRow(row)
 }
 
 /**
