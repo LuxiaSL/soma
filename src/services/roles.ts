@@ -128,6 +128,31 @@ export function getGlobalEffectiveRegenRate(
 }
 
 /**
+ * Validate a Discord user ID (snowflake format)
+ * Discord snowflakes are numeric strings, typically 17-19 digits
+ */
+export function isValidDiscordUserId(id: string): boolean {
+  return /^\d{17,20}$/.test(id)
+}
+
+/**
+ * Check if a Discord user ID is in the admin users list
+ * Uses SOMA_ADMIN_USERS env var
+ */
+export function isAdminUserId(discordUserId: string): boolean {
+  const adminUserIds = process.env.SOMA_ADMIN_USERS?.split(',').map(u => u.trim()).filter(Boolean) || []
+  
+  // Validate all configured IDs and warn about invalid ones
+  for (const id of adminUserIds) {
+    if (!isValidDiscordUserId(id)) {
+      logger.warn({ invalidId: id }, 'Invalid Discord user ID in SOMA_ADMIN_USERS (should be 17-20 digits)')
+    }
+  }
+  
+  return adminUserIds.includes(discordUserId)
+}
+
+/**
  * Check if a user has admin role in any cached server
  * Uses SOMA_ADMIN_ROLES env var
  */

@@ -14,7 +14,7 @@ import {
 import type { Database } from 'better-sqlite3'
 import { addBalance } from '../../services/balance.js'
 import { getOrCreateUser, getOrCreateServer, updateServerConfig } from '../../services/user.js'
-import { updateUserServerRoles, getGlobalEffectiveRegenRate, hasGlobalAdminRole } from '../../services/roles.js'
+import { updateUserServerRoles, getGlobalEffectiveRegenRate, hasGlobalAdminRole, isAdminUserId } from '../../services/roles.js'
 import { generateId } from '../../db/connection.js'
 import { createGrantEmbed, Emoji, Colors } from '../embeds/builders.js'
 import { EmbedBuilder } from 'discord.js'
@@ -123,10 +123,16 @@ export const somaAdminCommand = new SlashCommandBuilder()
       .setDescription('Reset server configuration to defaults'))
 
 /**
- * Check if user has an admin role (from SOMA_ADMIN_ROLES env var)
+ * Check if user has admin access
+ * Checks: SOMA_ADMIN_USERS (user IDs), then SOMA_ADMIN_ROLES (role IDs)
  * Works in both server context (checks current roles) and DMs (checks cached roles)
  */
 function hasAdminRole(interaction: ChatInputCommandInteraction, db: Database): boolean {
+  // First check if user ID is in admin users list
+  if (isAdminUserId(interaction.user.id)) {
+    return true
+  }
+
   const adminRoleIds = process.env.SOMA_ADMIN_ROLES?.split(',').map(r => r.trim()).filter(Boolean) || []
   
   // If no admin roles configured, fall back to Discord's Administrator permission

@@ -138,6 +138,7 @@ npm start
 | `SOMA_PORT` | No | `3100` | API server port |
 | `SOMA_DATABASE_PATH` | No | `./data/soma.db` | Path to SQLite database file |
 | `SOMA_ADMIN_ROLES` | No | - | Comma-separated Discord role IDs for admin access |
+| `SOMA_ADMIN_USERS` | No | - | Comma-separated Discord user IDs for admin access |
 | `SOMA_DEV_GUILD_ID` | No | - | Guild ID for instant command registration (dev only) |
 | `SOMA_BASE_REGEN_RATE` | No | `5` | Ichor regenerated per hour (global setting) |
 | `SOMA_MAX_BALANCE` | No | `100` | Maximum ichor balance cap (global setting) |
@@ -165,6 +166,9 @@ SOMA_DISCORD_TOKEN=MTIzNDU2Nzg5...
 
 # Admin Roles (optional)
 SOMA_ADMIN_ROLES=123456789012345678,234567890123456789
+
+# Admin Users (optional) - specific user IDs that get admin access
+SOMA_ADMIN_USERS=123456789012345678,987654321098765432
 
 # Global Economy Settings (optional - these are the defaults)
 SOMA_BASE_REGEN_RATE=5
@@ -537,10 +541,11 @@ All user commands are available to everyone by default:
 
 Admin commands (`/soma`) require one of:
 
-1. **Discord Administrator Permission** (default)
+1. **Configured Admin User ID** (if `SOMA_ADMIN_USERS` is set - checked first)
 2. **Configured Admin Role** (if `SOMA_ADMIN_ROLES` is set)
+3. **Discord Administrator Permission** (fallback if neither above is configured)
 
-**Admin role check behavior**:
+**Admin check behavior**:
 - In server: Checks user's current server roles
 - In DMs: Checks cached roles from all known servers
 
