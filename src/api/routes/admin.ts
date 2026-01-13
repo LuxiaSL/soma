@@ -20,7 +20,7 @@ import type {
 import { addBalance } from '../../services/balance.js'
 import { setBotCost, setRoleConfig } from '../../services/cost.js'
 import { getOrCreateUser, getOrCreateServer, updateServerConfig } from '../../services/user.js'
-import { getGlobalConfig, updateGlobalConfig, getGlobalConfigInfo } from '../../services/config.js'
+import { updateGlobalConfig, getGlobalConfigInfo } from '../../services/config.js'
 import { ValidationError } from '../../utils/errors.js'
 import { logger } from '../../utils/logger.js'
 
@@ -220,7 +220,7 @@ export function createAdminRouter(db: Database): Router {
   })
 
   // Get global configuration
-  router.get('/admin/global-config', (req: Request, res: Response, next: NextFunction) => {
+  router.get('/admin/global-config', (_req: Request, res: Response, next: NextFunction) => {
     try {
       const { config, modifiedBy, modifiedAt } = getGlobalConfigInfo(db)
 
@@ -237,12 +237,18 @@ export function createAdminRouter(db: Database): Router {
   // Update global configuration
   router.post('/admin/global-config', (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { rewardCooldownSeconds, globalCostMultiplier, modifiedBy } = req.body
+      const { rewardCooldownMinutes, maxDailyRewards, globalCostMultiplier, modifiedBy } = req.body
 
       // Validate inputs
-      if (rewardCooldownSeconds !== undefined) {
-        if (typeof rewardCooldownSeconds !== 'number' || rewardCooldownSeconds < 0 || rewardCooldownSeconds > 3600) {
-          throw new ValidationError('rewardCooldownSeconds must be between 0 and 3600', 'rewardCooldownSeconds')
+      if (rewardCooldownMinutes !== undefined) {
+        if (typeof rewardCooldownMinutes !== 'number' || rewardCooldownMinutes < 0 || rewardCooldownMinutes > 1440) {
+          throw new ValidationError('rewardCooldownMinutes must be between 0 and 1440 (24 hours)', 'rewardCooldownMinutes')
+        }
+      }
+
+      if (maxDailyRewards !== undefined) {
+        if (typeof maxDailyRewards !== 'number' || maxDailyRewards < 0 || maxDailyRewards > 100) {
+          throw new ValidationError('maxDailyRewards must be between 0 and 100', 'maxDailyRewards')
         }
       }
 
@@ -252,8 +258,9 @@ export function createAdminRouter(db: Database): Router {
         }
       }
 
-      const updates: { rewardCooldownSeconds?: number; globalCostMultiplier?: number } = {}
-      if (rewardCooldownSeconds !== undefined) updates.rewardCooldownSeconds = rewardCooldownSeconds
+      const updates: { rewardCooldownMinutes?: number; maxDailyRewards?: number; globalCostMultiplier?: number } = {}
+      if (rewardCooldownMinutes !== undefined) updates.rewardCooldownMinutes = rewardCooldownMinutes
+      if (maxDailyRewards !== undefined) updates.maxDailyRewards = maxDailyRewards
       if (globalCostMultiplier !== undefined) updates.globalCostMultiplier = globalCostMultiplier
 
       if (Object.keys(updates).length === 0) {

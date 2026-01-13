@@ -16,7 +16,7 @@ import { logger } from '../utils/logger.js'
 let cachedEnvConfig: Pick<GlobalConfig, 'baseRegenRate' | 'maxBalance' | 'startingBalance'> | null = null
 
 /** Cached runtime config (loaded from database, can be updated) */
-let cachedRuntimeConfig: Pick<GlobalConfig, 'rewardCooldownSeconds' | 'globalCostMultiplier'> | null = null
+let cachedRuntimeConfig: Pick<GlobalConfig, 'rewardCooldownMinutes' | 'maxDailyRewards' | 'globalCostMultiplier'> | null = null
 
 /** Database reference for runtime config */
 let configDb: Database | null = null
@@ -59,7 +59,7 @@ function loadEnvConfig(): Pick<GlobalConfig, 'baseRegenRate' | 'maxBalance' | 's
 /**
  * Load runtime config from database
  */
-function loadRuntimeConfig(): Pick<GlobalConfig, 'rewardCooldownSeconds' | 'globalCostMultiplier'> {
+function loadRuntimeConfig(): Pick<GlobalConfig, 'rewardCooldownMinutes' | 'maxDailyRewards' | 'globalCostMultiplier'> {
   if (cachedRuntimeConfig) {
     return cachedRuntimeConfig
   }
@@ -67,25 +67,51 @@ function loadRuntimeConfig(): Pick<GlobalConfig, 'rewardCooldownSeconds' | 'glob
   if (!configDb) {
     // Return defaults if no database connection
     return {
-      rewardCooldownSeconds: DEFAULT_GLOBAL_CONFIG.rewardCooldownSeconds,
+      rewardCooldownMinutes: DEFAULT_GLOBAL_CONFIG.rewardCooldownMinutes,
+      maxDailyRewards: DEFAULT_GLOBAL_CONFIG.maxDailyRewards,
       globalCostMultiplier: DEFAULT_GLOBAL_CONFIG.globalCostMultiplier,
     }
   }
 
   try {
+    // Check which columns exist (handles pre-migration databases)
+    const tableInfo = configDb.prepare(`PRAGMA table_info(global_config)`).all() as Array<{ name: string }>
+    const columns = new Set(tableInfo.map(c => c.name))
+
+    // Build query based on available columns
+    const selectCols: string[] = []
+    if (columns.has('reward_cooldown_minutes')) {
+      selectCols.push('reward_cooldown_minutes')
+    } else if (columns.has('reward_cooldown_seconds')) {
+      // Fallback: convert seconds to minutes
+      selectCols.push('CAST(reward_cooldown_seconds / 60.0 AS INTEGER) as reward_cooldown_minutes')
+    }
+    if (columns.has('max_daily_rewards')) {
+      selectCols.push('max_daily_rewards')
+    }
+    if (columns.has('global_cost_multiplier')) {
+      selectCols.push('global_cost_multiplier')
+    }
+
+    if (selectCols.length === 0) {
+      throw new Error('global_config table has no recognized columns')
+    }
+
     const row = configDb.prepare(`
-      SELECT reward_cooldown_seconds, global_cost_multiplier
+      SELECT ${selectCols.join(', ')}
       FROM global_config WHERE id = 'global'
-    `).get() as { reward_cooldown_seconds: number; global_cost_multiplier: number } | undefined
+    `).get() as { reward_cooldown_minutes?: number; max_daily_rewards?: number; global_cost_multiplier?: number } | undefined
 
     cachedRuntimeConfig = {
-      rewardCooldownSeconds: row?.reward_cooldown_seconds ?? DEFAULT_GLOBAL_CONFIG.rewardCooldownSeconds,
+      rewardCooldownMinutes: row?.reward_cooldown_minutes ?? DEFAULT_GLOBAL_CONFIG.rewardCooldownMinutes,
+      maxDailyRewards: row?.max_daily_rewards ?? DEFAULT_GLOBAL_CONFIG.maxDailyRewards,
       globalCostMultiplier: row?.global_cost_multiplier ?? DEFAULT_GLOBAL_CONFIG.globalCostMultiplier,
     }
   } catch (error) {
     logger.warn({ error }, 'Failed to load runtime config from database, using defaults')
     cachedRuntimeConfig = {
-      rewardCooldownSeconds: DEFAULT_GLOBAL_CONFIG.rewardCooldownSeconds,
+      rewardCooldownMinutes: DEFAULT_GLOBAL_CONFIG.rewardCooldownMinutes,
+      maxDailyRewards: DEFAULT_GLOBAL_CONFIG.maxDailyRewards,
       globalCostMultiplier: DEFAULT_GLOBAL_CONFIG.globalCostMultiplier,
     }
   }
@@ -112,15 +138,20 @@ export function getGlobalConfig(): GlobalConfig {
  */
 export function updateGlobalConfig(
   db: Database,
-  updates: Partial<Pick<GlobalConfig, 'rewardCooldownSeconds' | 'globalCostMultiplier'>>,
+  updates: Partial<Pick<GlobalConfig, 'rewardCooldownMinutes' | 'maxDailyRewards' | 'globalCostMultiplier'>>,
   modifiedBy?: string
 ): GlobalConfig {
   const fields: string[] = []
   const values: (number | string)[] = []
 
-  if (updates.rewardCooldownSeconds !== undefined) {
-    fields.push('reward_cooldown_seconds = ?')
-    values.push(updates.rewardCooldownSeconds)
+  if (updates.rewardCooldownMinutes !== undefined) {
+    fields.push('reward_cooldown_minutes = ?')
+    values.push(updates.rewardCooldownMinutes)
+  }
+
+  if (updates.maxDailyRewards !== undefined) {
+    fields.push('max_daily_rewards = ?')
+    values.push(updates.maxDailyRewards)
   }
 
   if (updates.globalCostMultiplier !== undefined) {
@@ -157,20 +188,27 @@ export function getGlobalConfigInfo(db: Database): {
   modifiedBy: string | null
   modifiedAt: string | null
 } {
-  const row = db.prepare(`
-    SELECT reward_cooldown_seconds, global_cost_multiplier, modified_by, modified_at
-    FROM global_config WHERE id = 'global'
-  `).get() as {
-    reward_cooldown_seconds: number
-    global_cost_multiplier: number
-    modified_by: string | null
-    modified_at: string | null
-  } | undefined
+  try {
+    const row = db.prepare(`
+      SELECT modified_by, modified_at
+      FROM global_config WHERE id = 'global'
+    `).get() as {
+      modified_by: string | null
+      modified_at: string | null
+    } | undefined
 
-  return {
-    config: getGlobalConfig(),
-    modifiedBy: row?.modified_by || null,
-    modifiedAt: row?.modified_at || null,
+    return {
+      config: getGlobalConfig(),
+      modifiedBy: row?.modified_by || null,
+      modifiedAt: row?.modified_at || null,
+    }
+  } catch (error) {
+    logger.warn({ error }, 'Failed to get global config info')
+    return {
+      config: getGlobalConfig(),
+      modifiedBy: null,
+      modifiedAt: null,
+    }
   }
 }
 

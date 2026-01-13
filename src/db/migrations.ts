@@ -75,6 +75,71 @@ const MIGRATIONS: Migration[] = [
       db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON user_notifications(user_id, read, created_at DESC)`)
     }
   },
+  {
+    id: '004_add_global_config',
+    description: 'Add global_config table for runtime-configurable settings',
+    up: (db) => {
+      // Create table if it doesn't exist (with old column name for now)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS global_config (
+          id TEXT PRIMARY KEY DEFAULT 'global',
+          reward_cooldown_seconds INTEGER NOT NULL DEFAULT 60,
+          global_cost_multiplier REAL NOT NULL DEFAULT 1.0,
+          modified_by TEXT,
+          modified_at TEXT DEFAULT (datetime('now'))
+        )
+      `)
+      // Insert default row if not exists
+      db.exec(`INSERT OR IGNORE INTO global_config (id) VALUES ('global')`)
+    }
+  },
+  {
+    id: '005_global_config_rewards_update',
+    description: 'Update global_config: rename cooldown to minutes, add max daily rewards',
+    up: (db) => {
+      // Check current columns
+      const tableInfo = db.prepare(`PRAGMA table_info(global_config)`).all() as Array<{ name: string }>
+      const existingColumns = new Set(tableInfo.map(c => c.name))
+
+      // SQLite doesn't support RENAME COLUMN in older versions, so we need to check
+      // If old column exists, we need to handle the rename
+      if (existingColumns.has('reward_cooldown_seconds') && !existingColumns.has('reward_cooldown_minutes')) {
+        // Get current value before migration
+        const currentRow = db.prepare(`SELECT reward_cooldown_seconds FROM global_config WHERE id = 'global'`).get() as { reward_cooldown_seconds: number } | undefined
+        const currentSeconds = currentRow?.reward_cooldown_seconds ?? 60
+        // Convert seconds to minutes (round up)
+        const currentMinutes = Math.ceil(currentSeconds / 60)
+
+        // Add new column
+        db.exec(`ALTER TABLE global_config ADD COLUMN reward_cooldown_minutes INTEGER NOT NULL DEFAULT 5`)
+        
+        // Copy converted value
+        db.prepare(`UPDATE global_config SET reward_cooldown_minutes = ? WHERE id = 'global'`).run(currentMinutes)
+        
+        // Note: We can't drop the old column in SQLite without recreating the table
+        // The old column will remain but be unused - this is fine for SQLite
+      }
+
+      // Add max_daily_rewards if it doesn't exist
+      if (!existingColumns.has('max_daily_rewards')) {
+        db.exec(`ALTER TABLE global_config ADD COLUMN max_daily_rewards INTEGER NOT NULL DEFAULT 3`)
+      }
+    }
+  },
+  {
+    id: '006_add_user_daily_rewards',
+    description: 'Add user_daily_rewards table for tracking free rewards per day',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_daily_rewards (
+          discord_id TEXT PRIMARY KEY,
+          rewards_today INTEGER NOT NULL DEFAULT 0,
+          last_reward_at TEXT,
+          reset_date TEXT NOT NULL DEFAULT (date('now'))
+        )
+      `)
+    }
+  },
 ]
 
 /**

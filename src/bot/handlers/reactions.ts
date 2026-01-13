@@ -35,40 +35,138 @@ const DEFAULT_REWARD_AMOUNT = 1
 /** Default tip amount */
 const DEFAULT_TIP_AMOUNT = 5
 
-/** 
- * Per-user cooldown map: `{discordUserId}` -> timestamp of last reward
- * This is purely per-user to prevent abuse - if you reward any message,
- * you must wait before rewarding any other message.
- */
-const rewardCooldowns = new Map<string, number>()
+/** Database reference for reward tracking */
+let rewardDb: Database | null = null
 
 /**
- * Get reward cooldown in milliseconds from global config
+ * Set the database reference for reward tracking
  */
-function getRewardCooldownMs(): number {
+export function setRewardDatabase(db: Database): void {
+  rewardDb = db
+}
+
+/**
+ * Get today's date string in YYYY-MM-DD format
+ */
+function getTodayDateString(): string {
+  return new Date().toISOString().split('T')[0]
+}
+
+/**
+ * Get or create a user's daily reward tracking record
+ * Automatically resets if the date has changed
+ */
+function getUserDailyRewardInfo(discordUserId: string): {
+  rewardsToday: number
+  lastRewardAt: Date | null
+} {
+  if (!rewardDb) {
+    return { rewardsToday: 0, lastRewardAt: null }
+  }
+
+  const today = getTodayDateString()
+
+  // Try to get existing record
+  const row = rewardDb.prepare(`
+    SELECT rewards_today, last_reward_at, reset_date
+    FROM user_daily_rewards WHERE discord_id = ?
+  `).get(discordUserId) as { rewards_today: number; last_reward_at: string | null; reset_date: string } | undefined
+
+  if (!row) {
+    return { rewardsToday: 0, lastRewardAt: null }
+  }
+
+  // If the reset date is not today, the count should be treated as 0
+  if (row.reset_date !== today) {
+    return { rewardsToday: 0, lastRewardAt: row.last_reward_at ? new Date(row.last_reward_at) : null }
+  }
+
+  return {
+    rewardsToday: row.rewards_today,
+    lastRewardAt: row.last_reward_at ? new Date(row.last_reward_at) : null,
+  }
+}
+
+/**
+ * Record that a user gave a reward
+ */
+function recordUserReward(discordUserId: string): void {
+  if (!rewardDb) return
+
+  const today = getTodayDateString()
+
+  // Upsert the record
+  rewardDb.prepare(`
+    INSERT INTO user_daily_rewards (discord_id, rewards_today, last_reward_at, reset_date)
+    VALUES (?, 1, datetime('now'), ?)
+    ON CONFLICT(discord_id) DO UPDATE SET
+      rewards_today = CASE 
+        WHEN reset_date = ? THEN rewards_today + 1 
+        ELSE 1 
+      END,
+      last_reward_at = datetime('now'),
+      reset_date = ?
+  `).run(discordUserId, today, today, today)
+}
+
+/**
+ * Get the user's reward status including cooldown and daily limit
+ */
+export function getUserRewardStatus(discordUserId: string): {
+  rewardsUsedToday: number
+  maxDailyRewards: number
+  rewardsRemaining: number
+  cooldownRemainingSeconds: number
+  canReward: boolean
+  nextRewardAt: Date | null
+} {
   const config = getGlobalConfig()
-  return config.rewardCooldownSeconds * 1000
+  const { rewardsToday, lastRewardAt } = getUserDailyRewardInfo(discordUserId)
+
+  const maxDaily = config.maxDailyRewards
+  // When maxDaily is 0, it means unlimited - use Infinity for remaining
+  const remaining = maxDaily === 0 ? Infinity : Math.max(0, maxDaily - rewardsToday)
+
+  // Calculate cooldown
+  let cooldownRemainingSeconds = 0
+  let nextRewardAt: Date | null = null
+
+  if (lastRewardAt && config.rewardCooldownMinutes > 0) {
+    const cooldownMs = config.rewardCooldownMinutes * 60 * 1000
+    const elapsed = Date.now() - lastRewardAt.getTime()
+    const remainingMs = cooldownMs - elapsed
+
+    if (remainingMs > 0) {
+      cooldownRemainingSeconds = Math.ceil(remainingMs / 1000)
+      nextRewardAt = new Date(lastRewardAt.getTime() + cooldownMs)
+    }
+  }
+
+  // User can reward if they have remaining rewards AND are not on cooldown
+  const canReward = remaining > 0 && cooldownRemainingSeconds === 0
+
+  return {
+    rewardsUsedToday: rewardsToday,
+    maxDailyRewards: maxDaily,
+    rewardsRemaining: remaining,
+    cooldownRemainingSeconds,
+    canReward,
+    nextRewardAt: cooldownRemainingSeconds > 0 ? nextRewardAt : null,
+  }
 }
 
 /**
- * Get the remaining cooldown for a user in seconds (0 if no cooldown)
- */
-export function getUserRewardCooldownRemaining(discordUserId: string): number {
-  const lastReward = rewardCooldowns.get(discordUserId)
-  if (!lastReward) return 0
-  
-  const cooldownMs = getRewardCooldownMs()
-  const elapsed = Date.now() - lastReward
-  const remaining = cooldownMs - elapsed
-  
-  return remaining > 0 ? Math.ceil(remaining / 1000) : 0
-}
-
-/**
- * Check if a user is on reward cooldown
+ * Check if a user can give a reward (for backward compatibility)
  */
 export function isUserOnRewardCooldown(discordUserId: string): boolean {
-  return getUserRewardCooldownRemaining(discordUserId) > 0
+  return !getUserRewardStatus(discordUserId).canReward
+}
+
+/**
+ * Get the remaining cooldown for a user in seconds (for backward compatibility)
+ */
+export function getUserRewardCooldownRemaining(discordUserId: string): number {
+  return getUserRewardStatus(discordUserId).cooldownRemainingSeconds
 }
 
 export async function handleReactionAdd(
@@ -279,7 +377,7 @@ async function processReward(
   // Get reactor's internal user ID for permanent tracking and cache their profile
   const reactorUser = getOrCreateUser(db, reactor.id, extractDiscordUserInfo(reactor))
 
-  // Check if user has already rewarded this message (permanent check)
+  // Check if user has already rewarded this message (permanent check - one reward per message per user)
   if (hasClaimedReward(db, reactorUser.id, messageId)) {
     logger.debug({
       reactorId: reactor.id,
@@ -288,19 +386,27 @@ async function processReward(
     return
   }
 
-  // Check per-user rate limit cooldown (prevents rapid rewarding across any messages)
-  const cooldownRemaining = getUserRewardCooldownRemaining(reactor.id)
-  if (cooldownRemaining > 0) {
+  // Check daily limit and cooldown
+  const rewardStatus = getUserRewardStatus(reactor.id)
+  
+  if (rewardStatus.rewardsRemaining <= 0) {
     logger.debug({
       reactorId: reactor.id,
       messageId,
-      cooldownRemaining,
-    }, 'User on reward cooldown')
+      rewardsUsedToday: rewardStatus.rewardsUsedToday,
+      maxDaily: rewardStatus.maxDailyRewards,
+    }, 'User has used all daily rewards')
     return
   }
 
-  // Set per-user cooldown (applies to all future rewards regardless of message)
-  rewardCooldowns.set(reactor.id, Date.now())
+  if (rewardStatus.cooldownRemainingSeconds > 0) {
+    logger.debug({
+      reactorId: reactor.id,
+      messageId,
+      cooldownRemaining: rewardStatus.cooldownRemainingSeconds,
+    }, 'User on reward cooldown')
+    return
+  }
 
   try {
     // Record the reward claim permanently (before granting, for atomicity)
@@ -316,6 +422,12 @@ async function processReward(
       { emoji, messageId, reactorId: reactor.id }
     )
 
+    // Record that this user gave a reward AFTER success (updates daily count and cooldown timestamp)
+    recordUserReward(reactor.id)
+
+    // Get updated status to log
+    const updatedStatus = getUserRewardStatus(reactor.id)
+    
     logger.info({
       reactorId: reactor.id,
       recipientUserId,
@@ -323,6 +435,8 @@ async function processReward(
       emoji,
       messageId,
       newBalance: result.balanceAfter,
+      rewardsUsedToday: updatedStatus.rewardsUsedToday,
+      rewardsRemaining: updatedStatus.rewardsRemaining,
     }, 'Reward processed successfully')
 
     // Rewards are silent - no DM notification (too noisy)
@@ -337,23 +451,23 @@ async function processReward(
 }
 
 /**
- * Cleanup old cooldown entries (call periodically)
+ * Cleanup old reward tracking entries (call periodically)
+ * Removes entries older than 7 days to keep the table small
  */
 export function cleanupRewardCooldowns(): void {
-  const now = Date.now()
-  const cooldownMs = getRewardCooldownMs()
-  let cleaned = 0
+  if (!rewardDb) return
 
-  for (const [userId, timestamp] of rewardCooldowns.entries()) {
-    // Clean up entries that are well past the cooldown period
-    if (now - timestamp > cooldownMs * 2) {
-      rewardCooldowns.delete(userId)
-      cleaned++
+  try {
+    const result = rewardDb.prepare(`
+      DELETE FROM user_daily_rewards 
+      WHERE reset_date < date('now', '-7 days')
+    `).run()
+
+    if (result.changes > 0) {
+      logger.debug({ cleaned: result.changes }, 'Cleaned up old reward tracking entries')
     }
-  }
-
-  if (cleaned > 0) {
-    logger.debug({ cleaned }, 'Cleaned up user reward cooldowns')
+  } catch (error) {
+    logger.error({ error }, 'Failed to cleanup reward tracking entries')
   }
 }
 

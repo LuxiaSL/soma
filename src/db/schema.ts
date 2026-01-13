@@ -120,7 +120,8 @@ CREATE TABLE IF NOT EXISTS user_notifications (
 -- Single row table - only one row with id='global'
 CREATE TABLE IF NOT EXISTS global_config (
   id TEXT PRIMARY KEY DEFAULT 'global',
-  reward_cooldown_seconds INTEGER NOT NULL DEFAULT 60,
+  reward_cooldown_minutes INTEGER NOT NULL DEFAULT 5,
+  max_daily_rewards INTEGER NOT NULL DEFAULT 3,
   global_cost_multiplier REAL NOT NULL DEFAULT 1.0,
   modified_by TEXT,
   modified_at TEXT DEFAULT (datetime('now'))
@@ -128,6 +129,15 @@ CREATE TABLE IF NOT EXISTS global_config (
 
 -- Insert default global config if not exists
 INSERT OR IGNORE INTO global_config (id) VALUES ('global');
+
+-- Daily reward tracking per user
+-- Tracks how many free rewards a user has given today
+CREATE TABLE IF NOT EXISTS user_daily_rewards (
+  discord_id TEXT PRIMARY KEY,
+  rewards_today INTEGER NOT NULL DEFAULT 0,
+  last_reward_at TEXT,
+  reset_date TEXT NOT NULL DEFAULT (date('now'))
+);
 
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_transactions_from_user ON transactions(from_user_id, timestamp);

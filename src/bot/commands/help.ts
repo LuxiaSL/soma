@@ -161,7 +161,7 @@ function createCommandsEmbed(): EmbedBuilder {
           '• Setting bot costs\n' +
           '• Configuring role multipliers\n' +
           '• Customizing reward/tip emoji\n' +
-          '• Global cost multiplier & reward cooldown',
+          '• Global: cost multiplier, reward cooldown & daily limits',
       }
     )
 }
@@ -231,10 +231,19 @@ function createEconomyEmbed(globalConfig: any): EmbedBuilder {
         value:
           'Ways to get more ichor:\n' +
           '• **Wait** for regeneration\n' +
-          '• **Receive tips** from other users\n' +
+          '• **Receive tips** from other users (costs them ichor)\n' +
           '• **Get rewards** when people react to your bot messages\n' +
           '• **Receive transfers** from generous users\n' +
           '• **Admin grants** for special occasions',
+      },
+      {
+        name: `${Emoji.REWARD} Free Rewards`,
+        value:
+          `You can give **${globalConfig.maxDailyRewards || '∞'} free rewards** per day.\n` +
+          (globalConfig.rewardCooldownMinutes > 0 
+            ? `There's a **${globalConfig.rewardCooldownMinutes} minute** cooldown between rewards.\n`
+            : '') +
+          `_Check your remaining rewards with_ \`/balance\``,
       },
       {
         name: '🎭 Role Benefits',

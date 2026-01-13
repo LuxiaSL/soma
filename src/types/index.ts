@@ -48,7 +48,8 @@ export interface GlobalConfig {
   startingBalance: number    // Initial ichor for new users (default: 50)
   
   // Runtime-configurable (stored in database, changeable by admins)
-  rewardCooldownSeconds: number  // Cooldown per user per message for free rewards (default: 60)
+  rewardCooldownMinutes: number  // Cooldown between free rewards in minutes (default: 5)
+  maxDailyRewards: number        // Max free rewards per user per day (default: 3)
   globalCostMultiplier: number   // Multiplier applied to all bot costs (default: 1.0)
 }
 
@@ -68,7 +69,8 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   baseRegenRate: 5,
   maxBalance: 100,
   startingBalance: 50,
-  rewardCooldownSeconds: 60,
+  rewardCooldownMinutes: 5,
+  maxDailyRewards: 3,
   globalCostMultiplier: 1.0,
 }
 

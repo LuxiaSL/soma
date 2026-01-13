@@ -48,7 +48,12 @@ export function createBalanceEmbed(data: {
   effectiveRegenRate: number
   nextRegenAt: Date | null
   roleBonus?: { multiplier: number; roleName?: string }
-  rewardCooldown?: { remaining: number; total: number }
+  rewardStatus?: {
+    rewardsRemaining: number
+    maxDailyRewards: number
+    cooldownRemainingSeconds: number
+    nextRewardAt: Date | null
+  }
 }): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setColor(Colors.ICHOR_PURPLE)
@@ -76,20 +81,26 @@ export function createBalanceEmbed(data: {
     .setFooter({ text: 'Soma Credit System' })
     .setTimestamp()
 
-  // Add reward cooldown status if configured
-  if (data.rewardCooldown && data.rewardCooldown.total > 0) {
-    const { remaining, total } = data.rewardCooldown
-    let cooldownValue: string
-    if (remaining > 0) {
-      // Show countdown
-      const readyAt = new Date(Date.now() + remaining * 1000)
-      cooldownValue = `⏳ Ready <t:${Math.floor(readyAt.getTime() / 1000)}:R>`
+  // Add reward status if configured (max > 0)
+  if (data.rewardStatus && data.rewardStatus.maxDailyRewards > 0) {
+    const { rewardsRemaining, maxDailyRewards, cooldownRemainingSeconds, nextRewardAt } = data.rewardStatus
+    
+    let statusValue: string
+    
+    if (rewardsRemaining <= 0) {
+      // No rewards left today
+      statusValue = `🚫 **0/${maxDailyRewards}** remaining today\n_Resets at midnight_`
+    } else if (cooldownRemainingSeconds > 0 && nextRewardAt) {
+      // On cooldown
+      statusValue = `⏳ **${rewardsRemaining}/${maxDailyRewards}** remaining\nReady <t:${Math.floor(nextRewardAt.getTime() / 1000)}:R>`
     } else {
-      cooldownValue = `${Emoji.CHECK} Ready to reward!`
+      // Ready to reward
+      statusValue = `${Emoji.CHECK} **${rewardsRemaining}/${maxDailyRewards}** remaining\nReady to reward!`
     }
+    
     embed.addFields({
       name: `${Emoji.REWARD} Free Rewards`,
-      value: cooldownValue,
+      value: statusValue,
       inline: true,
     })
   }

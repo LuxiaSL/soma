@@ -130,13 +130,23 @@ export const somaAdminCommand = new SlashCommandBuilder()
   .addSubcommand(sub =>
     sub
       .setName('global-reward-cooldown')
-      .setDescription('Set reward cooldown (seconds between free rewards per user/message)')
+      .setDescription('Set cooldown between free rewards (in minutes)')
       .addIntegerOption(opt =>
-        opt.setName('seconds')
-          .setDescription('Cooldown in seconds (default: 60)')
+        opt.setName('minutes')
+          .setDescription('Cooldown in minutes (default: 5, max: 1440 = 24 hours)')
           .setRequired(true)
           .setMinValue(0)
-          .setMaxValue(3600)))
+          .setMaxValue(1440)))
+  .addSubcommand(sub =>
+    sub
+      .setName('global-max-daily-rewards')
+      .setDescription('Set maximum free rewards per user per day')
+      .addIntegerOption(opt =>
+        opt.setName('count')
+          .setDescription('Max rewards per day (default: 3, 0 = unlimited)')
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(100)))
   .addSubcommand(sub =>
     sub
       .setName('global-cost-multiplier')
@@ -291,6 +301,9 @@ export async function executeSomaAdmin(
       break
     case 'global-reward-cooldown':
       await executeGlobalRewardCooldown(interaction, db)
+      break
+    case 'global-max-daily-rewards':
+      await executeGlobalMaxDailyRewards(interaction, db)
       break
     case 'global-cost-multiplier':
       await executeGlobalCostMultiplier(interaction, db)
@@ -1130,6 +1143,18 @@ async function executeGlobalView(
 ): Promise<void> {
   const { config, modifiedBy, modifiedAt } = getGlobalConfigInfo(db)
 
+  // Format cooldown nicely
+  const cooldownStr = config.rewardCooldownMinutes === 0 
+    ? 'Disabled' 
+    : config.rewardCooldownMinutes === 1 
+      ? '1 minute' 
+      : `${config.rewardCooldownMinutes} minutes`
+
+  // Format daily limit
+  const dailyLimitStr = config.maxDailyRewards === 0
+    ? 'Unlimited'
+    : `${config.maxDailyRewards}/day`
+
   const embed = new EmbedBuilder()
     .setColor(Colors.ICHOR_PURPLE)
     .setTitle('🌐 Global Configuration')
@@ -1144,8 +1169,11 @@ async function executeGlobalView(
         ].join('\n'),
       },
       {
-        name: '⏱️ Reward Cooldown',
-        value: `**${config.rewardCooldownSeconds}** seconds between free rewards per user/message`,
+        name: `${Emoji.REWARD} Free Rewards`,
+        value: [
+          `Daily Limit: **${dailyLimitStr}**`,
+          `Cooldown: **${cooldownStr}** between rewards`,
+        ].join('\n'),
         inline: true,
       },
       {
@@ -1179,31 +1207,34 @@ async function executeGlobalRewardCooldown(
   interaction: ChatInputCommandInteraction,
   db: Database
 ): Promise<void> {
-  const seconds = interaction.options.getInteger('seconds', true)
+  const minutes = interaction.options.getInteger('minutes', true)
   const previousConfig = getGlobalConfig()
-  const previousValue = previousConfig.rewardCooldownSeconds
+  const previousValue = previousConfig.rewardCooldownMinutes
 
   updateGlobalConfig(db, {
-    rewardCooldownSeconds: seconds,
+    rewardCooldownMinutes: minutes,
   }, interaction.user.id)
+
+  // Format nicely
+  const formatMinutes = (m: number) => m === 0 ? 'No cooldown' : m === 1 ? '1 minute' : `${m} minutes`
 
   const embed = new EmbedBuilder()
     .setColor(Colors.SUCCESS_GREEN)
     .setTitle(`${Emoji.CHECK} Reward Cooldown Updated`)
     .setDescription(
-      seconds === 0 
-        ? '⚠️ Reward cooldown disabled! Users can reward rapidly (but still one reward per message).'
-        : `Set reward cooldown to **${seconds} seconds** per user/message.`
+      minutes === 0 
+        ? '⚠️ Reward cooldown disabled! Users can give all their daily rewards at once.'
+        : `Set reward cooldown to **${formatMinutes(minutes)}** between free rewards.`
     )
     .addFields(
       {
         name: 'Previous Value',
-        value: `${previousValue} seconds`,
+        value: formatMinutes(previousValue),
         inline: true,
       },
       {
         name: 'New Value',
-        value: `${seconds} seconds`,
+        value: formatMinutes(minutes),
         inline: true,
       }
     )
@@ -1212,9 +1243,63 @@ async function executeGlobalRewardCooldown(
 
   logger.info({
     setBy: interaction.user.id,
-    rewardCooldownSeconds: seconds,
+    rewardCooldownMinutes: minutes,
     previousValue,
   }, 'Global reward cooldown updated')
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function executeGlobalMaxDailyRewards(
+  interaction: ChatInputCommandInteraction,
+  db: Database
+): Promise<void> {
+  const count = interaction.options.getInteger('count', true)
+  const previousConfig = getGlobalConfig()
+  const previousValue = previousConfig.maxDailyRewards
+
+  updateGlobalConfig(db, {
+    maxDailyRewards: count,
+  }, interaction.user.id)
+
+  // Format nicely
+  const formatCount = (c: number) => c === 0 ? 'Unlimited' : `${c}/day`
+
+  const embed = new EmbedBuilder()
+    .setColor(Colors.SUCCESS_GREEN)
+    .setTitle(`${Emoji.CHECK} Max Daily Rewards Updated`)
+    .setDescription(
+      count === 0 
+        ? '⚠️ Daily limit disabled! Users can give unlimited free rewards per day (still subject to cooldown and one per message).'
+        : `Set max daily free rewards to **${count}** per user per day.`
+    )
+    .addFields(
+      {
+        name: 'Previous Value',
+        value: formatCount(previousValue),
+        inline: true,
+      },
+      {
+        name: 'New Value',
+        value: formatCount(count),
+        inline: true,
+      },
+      {
+        name: '💡 Info',
+        value: 'Users can still only give one free reward per message. The daily count resets at midnight UTC.',
+      }
+    )
+    .setFooter({ text: 'This affects all servers globally' })
+    .setTimestamp()
+
+  logger.info({
+    setBy: interaction.user.id,
+    maxDailyRewards: count,
+    previousValue,
+  }, 'Global max daily rewards updated')
 
   await interaction.reply({
     embeds: [embed],

@@ -13,6 +13,7 @@ import { ApiServer } from './api/server.js'
 import { SomaBot } from './bot/index.js'
 import { cleanupExpiredMessages } from './services/tracking.js'
 import { setConfigDatabase } from './services/config.js'
+import { setRewardDatabase, cleanupRewardCooldowns } from './bot/handlers/reactions.js'
 import { logger } from './utils/logger.js'
 import type { SomaEventBus } from './types/events.js'
 
@@ -33,6 +34,9 @@ async function main(): Promise<void> {
 
   // Initialize config service with database for runtime-configurable settings
   setConfigDatabase(db)
+
+  // Initialize reward tracking with database
+  setRewardDatabase(db)
 
   // Create shared event bus for API <-> Bot communication
   const eventBus = new EventEmitter() as SomaEventBus
@@ -74,12 +78,13 @@ async function main(): Promise<void> {
     await bot.start()
   }
 
-  // Start periodic cleanup of expired tracked messages
+  // Start periodic cleanup of expired tracked messages and old reward entries
   setInterval(() => {
     try {
       cleanupExpiredMessages(db)
+      cleanupRewardCooldowns()
     } catch (error) {
-      logger.error({ error }, 'Error during tracked message cleanup')
+      logger.error({ error }, 'Error during periodic cleanup')
     }
   }, 60 * 60 * 1000) // Every hour
 
