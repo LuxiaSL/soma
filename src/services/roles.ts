@@ -149,7 +149,11 @@ export function isAdminUserId(discordUserId: string): boolean {
     }
   }
   
-  return adminUserIds.includes(discordUserId)
+  const isAdmin = adminUserIds.includes(discordUserId)
+  if (isAdmin) {
+    logger.debug({ discordUserId }, 'Admin access granted via SOMA_ADMIN_USERS')
+  }
+  return isAdmin
 }
 
 /**
@@ -169,15 +173,47 @@ export function hasGlobalAdminRole(
   const cachedServers = getUserAllServerRoles(db, userId)
 
   for (const serverCache of cachedServers) {
-    for (const roleId of serverCache.roleIds) {
-      if (adminRoleIds.includes(roleId)) {
-        return true
-      }
+    const matchingRole = serverCache.roleIds.find(r => adminRoleIds.includes(r))
+    if (matchingRole) {
+      logger.debug({ 
+        userId, 
+        roleId: matchingRole,
+        serverDiscordId: serverCache.serverDiscordId,
+      }, 'Admin access granted via SOMA_ADMIN_ROLES (cached)')
+      return true
     }
   }
 
   return false
 }
+
+/**
+ * Log admin configuration at startup for verification
+ */
+export function logAdminConfig(): void {
+  const adminUserIds = process.env.SOMA_ADMIN_USERS?.split(',').map(u => u.trim()).filter(Boolean) || []
+  const adminRoleIds = process.env.SOMA_ADMIN_ROLES?.split(',').map(r => r.trim()).filter(Boolean) || []
+
+  logger.info({
+    adminUsers: adminUserIds.length > 0 ? adminUserIds : '(none configured)',
+    adminRoles: adminRoleIds.length > 0 ? adminRoleIds : '(none configured)',
+  }, 'Admin access configuration loaded')
+
+  // Validate user IDs
+  for (const id of adminUserIds) {
+    if (!isValidDiscordUserId(id)) {
+      logger.warn({ invalidId: id }, 'Invalid Discord user ID in SOMA_ADMIN_USERS')
+    }
+  }
+
+  // Validate role IDs  
+  for (const id of adminRoleIds) {
+    if (!isValidDiscordUserId(id)) { // Role IDs have same format as user IDs
+      logger.warn({ invalidId: id }, 'Invalid Discord role ID in SOMA_ADMIN_ROLES')
+    }
+  }
+}
+
 
 /**
  * Get cache age in hours for a specific user/server combo

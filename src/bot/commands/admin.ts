@@ -133,13 +133,22 @@ export const somaAdminCommand = new SlashCommandBuilder()
  * Works in both server context (checks current roles) and DMs (checks cached roles)
  */
 function hasAdminRole(interaction: ChatInputCommandInteraction, db: Database): boolean {
+  const discordUserId = interaction.user.id
+  const guildId = interaction.guildId
+
   // Check if user has Discord Administrator permission (always a valid shortcut)
   if (interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+    logger.debug({
+      discordUserId,
+      guildId,
+      method: 'discord_admin_permission',
+    }, 'Admin access granted via Discord Administrator permission')
     return true
   }
 
   // Check if user ID is in admin users list
-  if (isAdminUserId(interaction.user.id)) {
+  if (isAdminUserId(discordUserId)) {
+    // Logging handled in isAdminUserId
     return true
   }
 
@@ -151,11 +160,26 @@ function hasAdminRole(interaction: ChatInputCommandInteraction, db: Database): b
     if (memberRoles) {
       // Handle both GuildMemberRoleManager (has cache) and string[] (API response)
       if ('cache' in memberRoles) {
-        if (memberRoles.cache.some(role => adminRoleIds.includes(role.id))) {
+        const matchingRole = memberRoles.cache.find(role => adminRoleIds.includes(role.id))
+        if (matchingRole) {
+          logger.debug({
+            discordUserId,
+            guildId,
+            roleId: matchingRole.id,
+            roleName: matchingRole.name,
+            method: 'current_server_role',
+          }, 'Admin access granted via current server role')
           return true
         }
       } else if (Array.isArray(memberRoles)) {
-        if (memberRoles.some(roleId => adminRoleIds.includes(roleId))) {
+        const matchingRoleId = memberRoles.find(roleId => adminRoleIds.includes(roleId))
+        if (matchingRoleId) {
+          logger.debug({
+            discordUserId,
+            guildId,
+            roleId: matchingRoleId,
+            method: 'current_server_role_array',
+          }, 'Admin access granted via current server role')
           return true
         }
       }
@@ -164,11 +188,17 @@ function hasAdminRole(interaction: ChatInputCommandInteraction, db: Database): b
     // In DMs or as fallback, check global cached roles
     const user = getOrCreateUser(db, interaction.user.id)
     if (hasGlobalAdminRole(db, user.id)) {
+      // Logging handled in hasGlobalAdminRole
       return true
     }
   }
 
   // User doesn't match any admin criteria
+  logger.debug({
+    discordUserId,
+    guildId,
+    hasAdminRolesConfigured: adminRoleIds.length > 0,
+  }, 'Admin access denied - no matching criteria')
   return false
 }
 

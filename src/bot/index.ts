@@ -14,6 +14,7 @@ import type { SomaEventBus } from '../types/events.js'
 import { registerCommands, handleInteraction } from './commands/index.js'
 import { handleReactionAdd } from './handlers/reactions.js'
 import { setupNotificationHandlers } from './handlers/notifications.js'
+import { logAdminConfig } from '../services/roles.js'
 import { logger } from '../utils/logger.js'
 
 /** Discord intents and partials needed for Soma bot functionality */
@@ -95,6 +96,9 @@ export class SomaBot {
 
   async start(): Promise<void> {
     logger.info('Starting Soma Discord bot...')
+
+    // Log admin configuration for verification
+    logAdminConfig()
 
     // Register slash commands
     await registerCommands(this.token)
