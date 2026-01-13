@@ -39,11 +39,17 @@ export interface ServerConfig {
 
 /**
  * Global configuration values (applies to all users)
+ * Some values come from environment (env), others are runtime configurable (db)
  */
 export interface GlobalConfig {
-  baseRegenRate: number   // Ichor per hour (default: 5)
-  maxBalance: number      // Maximum storable ichor (default: 100)
-  startingBalance: number // Initial ichor for new users (default: 50)
+  // Environment-configured (defaults, set at startup)
+  baseRegenRate: number      // Ichor per hour (default: 5)
+  maxBalance: number         // Maximum storable ichor (default: 100)
+  startingBalance: number    // Initial ichor for new users (default: 50)
+  
+  // Runtime-configurable (stored in database, changeable by admins)
+  rewardCooldownSeconds: number  // Cooldown per user per message for free rewards (default: 60)
+  globalCostMultiplier: number   // Multiplier applied to all bot costs (default: 1.0)
 }
 
 /**
@@ -62,6 +68,8 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   baseRegenRate: 5,
   maxBalance: 100,
   startingBalance: 50,
+  rewardCooldownSeconds: 60,
+  globalCostMultiplier: 1.0,
 }
 
 /**

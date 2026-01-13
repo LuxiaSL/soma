@@ -116,6 +116,19 @@ CREATE TABLE IF NOT EXISTS user_notifications (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Global configuration (runtime-configurable settings)
+-- Single row table - only one row with id='global'
+CREATE TABLE IF NOT EXISTS global_config (
+  id TEXT PRIMARY KEY DEFAULT 'global',
+  reward_cooldown_seconds INTEGER NOT NULL DEFAULT 60,
+  global_cost_multiplier REAL NOT NULL DEFAULT 1.0,
+  modified_by TEXT,
+  modified_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Insert default global config if not exists
+INSERT OR IGNORE INTO global_config (id) VALUES ('global');
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_transactions_from_user ON transactions(from_user_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_transactions_to_user ON transactions(to_user_id, timestamp);

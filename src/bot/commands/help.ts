@@ -160,7 +160,8 @@ function createCommandsEmbed(): EmbedBuilder {
           '• Granting/revoking ichor\n' +
           '• Setting bot costs\n' +
           '• Configuring role multipliers\n' +
-          '• Customizing reward/tip emoji',
+          '• Customizing reward/tip emoji\n' +
+          '• Global cost multiplier & reward cooldown',
       }
     )
 }
@@ -201,7 +202,7 @@ function createReactionsEmbed(serverConfig: any): EmbedBuilder {
 }
 
 function createEconomyEmbed(globalConfig: any): EmbedBuilder {
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setColor(Colors.ICHOR_PURPLE)
     .setTitle('💰 Ichor Economy')
     .setDescription(
@@ -244,6 +245,20 @@ function createEconomyEmbed(globalConfig: any): EmbedBuilder {
           '_Check `/balance` to see if you have any role bonuses!_',
       }
     )
+
+  // Show global cost multiplier if it's not 1.0
+  if (globalConfig.globalCostMultiplier !== 1.0) {
+    const mult = globalConfig.globalCostMultiplier
+    const discountOrSurcharge = mult < 1 
+      ? `🎉 **Global Discount Active!** All bots cost **${Math.round((1 - mult) * 100)}% less** right now!`
+      : `⚠️ **Global Surcharge Active!** All bots cost **${Math.round((mult - 1) * 100)}% more** right now.`
+    embed.addFields({
+      name: '🌐 Current Global Pricing',
+      value: discountOrSurcharge,
+    })
+  }
+
+  return embed
 }
 
 function createSettingsEmbed(): EmbedBuilder {
@@ -275,7 +290,7 @@ function createSettingsEmbed(): EmbedBuilder {
         name: '💡 Tips',
         value:
           '• Emoji reactions on your messages still work regardless of DM settings\n' +
-          '• The 💸 reaction on your message means you were out of ichor\n' +
+          `• The ${Emoji.INSUFFICIENT} reaction on your message means you were out of ichor\n` +
           '• Check your balance regularly with `/balance`',
       }
     )

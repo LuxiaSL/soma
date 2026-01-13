@@ -3,6 +3,8 @@
  * POST /admin/grant
  * POST /admin/set-cost
  * POST /admin/configure
+ * GET /admin/global-config
+ * POST /admin/global-config
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express'
@@ -18,6 +20,7 @@ import type {
 import { addBalance } from '../../services/balance.js'
 import { setBotCost, setRoleConfig } from '../../services/cost.js'
 import { getOrCreateUser, getOrCreateServer, updateServerConfig } from '../../services/user.js'
+import { getGlobalConfig, updateGlobalConfig, getGlobalConfigInfo } from '../../services/config.js'
 import { ValidationError } from '../../utils/errors.js'
 import { logger } from '../../utils/logger.js'
 
@@ -211,6 +214,63 @@ export function createAdminRouter(db: Database): Router {
       }, 'Role config set')
 
       res.json({ success: true })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  // Get global configuration
+  router.get('/admin/global-config', (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { config, modifiedBy, modifiedAt } = getGlobalConfigInfo(db)
+
+      res.json({
+        config,
+        modifiedBy,
+        modifiedAt,
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  // Update global configuration
+  router.post('/admin/global-config', (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { rewardCooldownSeconds, globalCostMultiplier, modifiedBy } = req.body
+
+      // Validate inputs
+      if (rewardCooldownSeconds !== undefined) {
+        if (typeof rewardCooldownSeconds !== 'number' || rewardCooldownSeconds < 0 || rewardCooldownSeconds > 3600) {
+          throw new ValidationError('rewardCooldownSeconds must be between 0 and 3600', 'rewardCooldownSeconds')
+        }
+      }
+
+      if (globalCostMultiplier !== undefined) {
+        if (typeof globalCostMultiplier !== 'number' || globalCostMultiplier < 0.1 || globalCostMultiplier > 10) {
+          throw new ValidationError('globalCostMultiplier must be between 0.1 and 10', 'globalCostMultiplier')
+        }
+      }
+
+      const updates: { rewardCooldownSeconds?: number; globalCostMultiplier?: number } = {}
+      if (rewardCooldownSeconds !== undefined) updates.rewardCooldownSeconds = rewardCooldownSeconds
+      if (globalCostMultiplier !== undefined) updates.globalCostMultiplier = globalCostMultiplier
+
+      if (Object.keys(updates).length === 0) {
+        throw new ValidationError('No valid fields to update', 'body')
+      }
+
+      const newConfig = updateGlobalConfig(db, updates, modifiedBy || 'api')
+
+      logger.info({
+        updates,
+        modifiedBy: modifiedBy || 'api',
+      }, 'Global config updated via API')
+
+      res.json({
+        success: true,
+        config: newConfig,
+      })
     } catch (error) {
       next(error)
     }

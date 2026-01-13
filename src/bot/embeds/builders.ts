@@ -48,6 +48,7 @@ export function createBalanceEmbed(data: {
   effectiveRegenRate: number
   nextRegenAt: Date | null
   roleBonus?: { multiplier: number; roleName?: string }
+  rewardCooldown?: { remaining: number; total: number }
 }): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setColor(Colors.ICHOR_PURPLE)
@@ -74,6 +75,24 @@ export function createBalanceEmbed(data: {
     )
     .setFooter({ text: 'Soma Credit System' })
     .setTimestamp()
+
+  // Add reward cooldown status if configured
+  if (data.rewardCooldown && data.rewardCooldown.total > 0) {
+    const { remaining, total } = data.rewardCooldown
+    let cooldownValue: string
+    if (remaining > 0) {
+      // Show countdown
+      const readyAt = new Date(Date.now() + remaining * 1000)
+      cooldownValue = `⏳ Ready <t:${Math.floor(readyAt.getTime() / 1000)}:R>`
+    } else {
+      cooldownValue = `${Emoji.CHECK} Ready to reward!`
+    }
+    embed.addFields({
+      name: `${Emoji.REWARD} Free Rewards`,
+      value: cooldownValue,
+      inline: true,
+    })
+  }
 
   // Add role bonus note if applicable
   if (data.roleBonus && data.roleBonus.multiplier > 1) {

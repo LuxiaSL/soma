@@ -16,6 +16,8 @@ import { getOrCreateUser, getOrCreateServer, extractDiscordUserInfo } from '../.
 import { updateUserServerRoles } from '../../services/roles.js'
 import { createBalanceEmbed, createBalanceButtons } from '../embeds/builders.js'
 import { maybeShowWelcome } from '../handlers/welcome.js'
+import { getUserRewardCooldownRemaining } from '../handlers/reactions.js'
+import { getGlobalConfig } from '../../services/config.js'
 import { logger } from '../../utils/logger.js'
 
 export const balanceCommand = new SlashCommandBuilder()
@@ -75,6 +77,10 @@ export async function executeBalance(
     }
   }
 
+  // Get reward cooldown info
+  const rewardCooldownRemaining = getUserRewardCooldownRemaining(userId)
+  const globalConfig = getGlobalConfig()
+
   const embed = createBalanceEmbed({
     balance: balanceData.balance,
     maxBalance: balanceData.maxBalance,
@@ -82,6 +88,10 @@ export async function executeBalance(
     effectiveRegenRate: balanceData.effectiveRegenRate,
     nextRegenAt,
     roleBonus,
+    rewardCooldown: {
+      remaining: rewardCooldownRemaining,
+      total: globalConfig.rewardCooldownSeconds,
+    },
   })
 
   const buttons = createBalanceButtons()

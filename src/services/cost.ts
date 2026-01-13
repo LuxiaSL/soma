@@ -1,24 +1,25 @@
 /**
  * Cost Service
- * Handles bot cost lookups with role multipliers
+ * Handles bot cost lookups with role multipliers and global cost multiplier
  */
 
 import type { Database } from 'better-sqlite3'
 import type { BotCost, BotCostRow } from '../types/index.js'
 import { generateId } from '../db/connection.js'
 import { getEffectiveCostMultiplier } from './balance.js'
+import { getGlobalConfig } from './config.js'
 import { BotNotConfiguredError } from '../utils/errors.js'
 import { logger } from '../utils/logger.js'
 
 /**
- * Get the cost for a bot activation (with role multipliers)
+ * Get the cost for a bot activation (with role multipliers and global cost multiplier)
  */
 export function getBotCost(
   db: Database,
   botDiscordId: string,
   serverId: string,
   userRoles: string[]
-): { cost: number; baseCost: number; multiplier: number } {
+): { cost: number; baseCost: number; roleMultiplier: number; globalMultiplier: number; totalMultiplier: number } {
   // First try server-specific cost
   let row = db.prepare(`
     SELECT base_cost FROM bot_costs
@@ -39,10 +40,13 @@ export function getBotCost(
   }
 
   const baseCost = row.base_cost
-  const multiplier = getEffectiveCostMultiplier(db, serverId, userRoles)
-  const cost = Math.max(0, Math.round(baseCost * multiplier * 100) / 100)
+  const roleMultiplier = getEffectiveCostMultiplier(db, serverId, userRoles)
+  const globalConfig = getGlobalConfig()
+  const globalMultiplier = globalConfig.globalCostMultiplier
+  const totalMultiplier = roleMultiplier * globalMultiplier
+  const cost = Math.max(0, Math.round(baseCost * totalMultiplier * 100) / 100)
 
-  return { cost, baseCost, multiplier }
+  return { cost, baseCost, roleMultiplier, globalMultiplier, totalMultiplier }
 }
 
 /**

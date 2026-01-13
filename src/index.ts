@@ -12,6 +12,7 @@ import { initDatabase, closeDatabase } from './db/connection.js'
 import { ApiServer } from './api/server.js'
 import { SomaBot } from './bot/index.js'
 import { cleanupExpiredMessages } from './services/tracking.js'
+import { setConfigDatabase } from './services/config.js'
 import { logger } from './utils/logger.js'
 import type { SomaEventBus } from './types/events.js'
 
@@ -29,6 +30,9 @@ async function main(): Promise<void> {
 
   // Initialize database
   const db = initDatabase(config.databasePath)
+
+  // Initialize config service with database for runtime-configurable settings
+  setConfigDatabase(db)
 
   // Create shared event bus for API <-> Bot communication
   const eventBus = new EventEmitter() as SomaEventBus

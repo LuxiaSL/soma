@@ -20,7 +20,7 @@ import { generateId } from '../../db/connection.js'
 import { createGrantEmbed, Emoji, Colors } from '../embeds/builders.js'
 import { EmbedBuilder } from 'discord.js'
 import { logger } from '../../utils/logger.js'
-import { getGlobalConfig, getDefaultServerConfig } from '../../services/config.js'
+import { getGlobalConfig, getDefaultServerConfig, updateGlobalConfig, getGlobalConfigInfo } from '../../services/config.js'
 import { DEFAULT_SERVER_CONFIG } from '../../types/index.js'
 
 export const somaAdminCommand = new SlashCommandBuilder()
@@ -122,6 +122,31 @@ export const somaAdminCommand = new SlashCommandBuilder()
     sub
       .setName('config-reset')
       .setDescription('Reset server configuration to defaults'))
+  // Global config subcommands (affects all servers)
+  .addSubcommand(sub =>
+    sub
+      .setName('global-view')
+      .setDescription('View global configuration (affects all servers)'))
+  .addSubcommand(sub =>
+    sub
+      .setName('global-reward-cooldown')
+      .setDescription('Set reward cooldown (seconds between free rewards per user/message)')
+      .addIntegerOption(opt =>
+        opt.setName('seconds')
+          .setDescription('Cooldown in seconds (default: 60)')
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(3600)))
+  .addSubcommand(sub =>
+    sub
+      .setName('global-cost-multiplier')
+      .setDescription('Set global cost multiplier (affects all bot costs across all users)')
+      .addNumberOption(opt =>
+        opt.setName('multiplier')
+          .setDescription('Multiplier (e.g., 0.5 for half price, 2.0 for double)')
+          .setRequired(true)
+          .setMinValue(0.1)
+          .setMaxValue(10)))
 
 /**
  * Check if user has admin access
@@ -260,6 +285,15 @@ export async function executeSomaAdmin(
       break
     case 'config-reset':
       await executeConfigReset(interaction, db)
+      break
+    case 'global-view':
+      await executeGlobalView(interaction, db)
+      break
+    case 'global-reward-cooldown':
+      await executeGlobalRewardCooldown(interaction, db)
+      break
+    case 'global-cost-multiplier':
+      await executeGlobalCostMultiplier(interaction, db)
       break
     default:
       await interaction.reply({
@@ -1079,6 +1113,167 @@ async function executeConfigReset(
     resetBy: interaction.user.id,
     serverId: server.id,
   }, 'Config reset to defaults')
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+// ============================================================================
+// Global Config Subcommands
+// ============================================================================
+
+async function executeGlobalView(
+  interaction: ChatInputCommandInteraction,
+  db: Database
+): Promise<void> {
+  const { config, modifiedBy, modifiedAt } = getGlobalConfigInfo(db)
+
+  const embed = new EmbedBuilder()
+    .setColor(Colors.ICHOR_PURPLE)
+    .setTitle('🌐 Global Configuration')
+    .setDescription('These settings affect **all servers and users**.')
+    .addFields(
+      {
+        name: '📊 Economy (from environment)',
+        value: [
+          `Base Regen Rate: **${config.baseRegenRate}**/hour`,
+          `Max Balance: **${config.maxBalance}** ichor`,
+          `Starting Balance: **${config.startingBalance}** ichor`,
+        ].join('\n'),
+      },
+      {
+        name: '⏱️ Reward Cooldown',
+        value: `**${config.rewardCooldownSeconds}** seconds between free rewards per user/message`,
+        inline: true,
+      },
+      {
+        name: '💰 Global Cost Multiplier',
+        value: config.globalCostMultiplier === 1.0 
+          ? '**1.0x** (normal pricing)' 
+          : `**${config.globalCostMultiplier}x** (${config.globalCostMultiplier < 1 ? 'discount' : 'surcharge'})`,
+        inline: true,
+      }
+    )
+    .setTimestamp()
+
+  if (modifiedBy) {
+    const modifiedAtStr = modifiedAt 
+      ? `<t:${Math.floor(new Date(modifiedAt).getTime() / 1000)}:R>`
+      : 'Unknown'
+    embed.setFooter({ text: `Runtime settings last modified by ${modifiedBy}` })
+    embed.addFields({
+      name: '📝 Last Modified',
+      value: `By <@${modifiedBy}> ${modifiedAtStr}`,
+    })
+  }
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function executeGlobalRewardCooldown(
+  interaction: ChatInputCommandInteraction,
+  db: Database
+): Promise<void> {
+  const seconds = interaction.options.getInteger('seconds', true)
+  const previousConfig = getGlobalConfig()
+  const previousValue = previousConfig.rewardCooldownSeconds
+
+  updateGlobalConfig(db, {
+    rewardCooldownSeconds: seconds,
+  }, interaction.user.id)
+
+  const embed = new EmbedBuilder()
+    .setColor(Colors.SUCCESS_GREEN)
+    .setTitle(`${Emoji.CHECK} Reward Cooldown Updated`)
+    .setDescription(
+      seconds === 0 
+        ? '⚠️ Reward cooldown disabled! Users can reward rapidly (but still one reward per message).'
+        : `Set reward cooldown to **${seconds} seconds** per user/message.`
+    )
+    .addFields(
+      {
+        name: 'Previous Value',
+        value: `${previousValue} seconds`,
+        inline: true,
+      },
+      {
+        name: 'New Value',
+        value: `${seconds} seconds`,
+        inline: true,
+      }
+    )
+    .setFooter({ text: 'This affects all servers globally' })
+    .setTimestamp()
+
+  logger.info({
+    setBy: interaction.user.id,
+    rewardCooldownSeconds: seconds,
+    previousValue,
+  }, 'Global reward cooldown updated')
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function executeGlobalCostMultiplier(
+  interaction: ChatInputCommandInteraction,
+  db: Database
+): Promise<void> {
+  const multiplier = interaction.options.getNumber('multiplier', true)
+  const previousConfig = getGlobalConfig()
+  const previousValue = previousConfig.globalCostMultiplier
+
+  updateGlobalConfig(db, {
+    globalCostMultiplier: multiplier,
+  }, interaction.user.id)
+
+  // Format the effect description
+  let effectDescription: string
+  if (multiplier === 1.0) {
+    effectDescription = 'All bot costs return to **normal pricing**.'
+  } else if (multiplier < 1.0) {
+    const discountPercent = Math.round((1 - multiplier) * 100)
+    effectDescription = `All bot costs reduced by **${discountPercent}%** (${multiplier}x multiplier).`
+  } else {
+    const increasePercent = Math.round((multiplier - 1) * 100)
+    effectDescription = `All bot costs increased by **${increasePercent}%** (${multiplier}x multiplier).`
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(multiplier < 1 ? Colors.SUCCESS_GREEN : multiplier > 1 ? Colors.WARNING_ORANGE : Colors.ICHOR_PURPLE)
+    .setTitle(`${Emoji.CHECK} Global Cost Multiplier Updated`)
+    .setDescription(effectDescription)
+    .addFields(
+      {
+        name: 'Previous Value',
+        value: `${previousValue}x`,
+        inline: true,
+      },
+      {
+        name: 'New Value',
+        value: `${multiplier}x`,
+        inline: true,
+      },
+      {
+        name: '💡 Example',
+        value: `A 10 ichor bot now costs **${(10 * multiplier).toFixed(1)} ichor** (before role discounts).`,
+      }
+    )
+    .setFooter({ text: 'This affects all bot costs across all servers and users' })
+    .setTimestamp()
+
+  logger.info({
+    setBy: interaction.user.id,
+    globalCostMultiplier: multiplier,
+    previousValue,
+  }, 'Global cost multiplier updated')
 
   await interaction.reply({
     embeds: [embed],

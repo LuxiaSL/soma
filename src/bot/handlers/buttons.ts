@@ -15,6 +15,8 @@ import { getBalance, transferBalance, getEffectiveRegenRateWithRole } from '../.
 import { getAllBotCosts, getUserKnownServersCosts } from '../../services/cost.js'
 import { getOrCreateUser, getOrCreateServer, extractDiscordUserInfo } from '../../services/user.js'
 import { updateUserServerRoles } from '../../services/roles.js'
+import { getUserRewardCooldownRemaining } from './reactions.js'
+import { getGlobalConfig } from '../../services/config.js'
 import {
   createBalanceEmbed,
   createBalanceButtons,
@@ -161,6 +163,10 @@ async function handleBalanceRefresh(
     }
   }
 
+  // Get reward cooldown info
+  const rewardCooldownRemaining = getUserRewardCooldownRemaining(interaction.user.id)
+  const globalConfig = getGlobalConfig()
+
   const embed = createBalanceEmbed({
     balance: balanceData.balance,
     maxBalance: balanceData.maxBalance,
@@ -168,6 +174,10 @@ async function handleBalanceRefresh(
     effectiveRegenRate: balanceData.effectiveRegenRate,
     nextRegenAt,
     roleBonus,
+    rewardCooldown: {
+      remaining: rewardCooldownRemaining,
+      total: globalConfig.rewardCooldownSeconds,
+    },
   })
 
   const buttons = createBalanceButtons()

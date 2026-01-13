@@ -20,6 +20,7 @@ import { isDmOptedIn } from '../../services/preferences.js'
 import { notifyTipReceived } from '../../services/notifications.js'
 import { createTipReceivedEmbed } from '../embeds/builders.js'
 import { sendDM, createViewMessageButton } from '../notifications/dm.js'
+import { getGlobalConfig } from '../../services/config.js'
 import { logger } from '../../utils/logger.js'
 
 /** Default reward emoji */
@@ -34,11 +35,41 @@ const DEFAULT_REWARD_AMOUNT = 1
 /** Default tip amount */
 const DEFAULT_TIP_AMOUNT = 5
 
-/** Cooldown map: `{userId}:{messageId}` -> timestamp */
+/** 
+ * Per-user cooldown map: `{discordUserId}` -> timestamp of last reward
+ * This is purely per-user to prevent abuse - if you reward any message,
+ * you must wait before rewarding any other message.
+ */
 const rewardCooldowns = new Map<string, number>()
 
-/** Cooldown duration in milliseconds (1 minute per message per user) */
-const REWARD_COOLDOWN_MS = 60 * 1000
+/**
+ * Get reward cooldown in milliseconds from global config
+ */
+function getRewardCooldownMs(): number {
+  const config = getGlobalConfig()
+  return config.rewardCooldownSeconds * 1000
+}
+
+/**
+ * Get the remaining cooldown for a user in seconds (0 if no cooldown)
+ */
+export function getUserRewardCooldownRemaining(discordUserId: string): number {
+  const lastReward = rewardCooldowns.get(discordUserId)
+  if (!lastReward) return 0
+  
+  const cooldownMs = getRewardCooldownMs()
+  const elapsed = Date.now() - lastReward
+  const remaining = cooldownMs - elapsed
+  
+  return remaining > 0 ? Math.ceil(remaining / 1000) : 0
+}
+
+/**
+ * Check if a user is on reward cooldown
+ */
+export function isUserOnRewardCooldown(discordUserId: string): boolean {
+  return getUserRewardCooldownRemaining(discordUserId) > 0
+}
 
 export async function handleReactionAdd(
   reaction: MessageReaction | PartialMessageReaction,
@@ -257,22 +288,19 @@ async function processReward(
     return
   }
 
-  // Also check rate limit cooldown (prevents spam within same session)
-  const cooldownKey = `${reactor.id}:${messageId}`
-  const lastReward = rewardCooldowns.get(cooldownKey)
-  const now = Date.now()
-
-  if (lastReward && now - lastReward < REWARD_COOLDOWN_MS) {
+  // Check per-user rate limit cooldown (prevents rapid rewarding across any messages)
+  const cooldownRemaining = getUserRewardCooldownRemaining(reactor.id)
+  if (cooldownRemaining > 0) {
     logger.debug({
       reactorId: reactor.id,
       messageId,
-      cooldownRemaining: REWARD_COOLDOWN_MS - (now - lastReward),
-    }, 'Reward on cooldown')
+      cooldownRemaining,
+    }, 'User on reward cooldown')
     return
   }
 
-  // Set cooldown
-  rewardCooldowns.set(cooldownKey, now)
+  // Set per-user cooldown (applies to all future rewards regardless of message)
+  rewardCooldowns.set(reactor.id, Date.now())
 
   try {
     // Record the reward claim permanently (before granting, for atomicity)
@@ -313,17 +341,19 @@ async function processReward(
  */
 export function cleanupRewardCooldowns(): void {
   const now = Date.now()
+  const cooldownMs = getRewardCooldownMs()
   let cleaned = 0
 
-  for (const [key, timestamp] of rewardCooldowns.entries()) {
-    if (now - timestamp > REWARD_COOLDOWN_MS * 2) {
-      rewardCooldowns.delete(key)
+  for (const [userId, timestamp] of rewardCooldowns.entries()) {
+    // Clean up entries that are well past the cooldown period
+    if (now - timestamp > cooldownMs * 2) {
+      rewardCooldowns.delete(userId)
       cleaned++
     }
   }
 
   if (cleaned > 0) {
-    logger.debug({ cleaned }, 'Cleaned up reward cooldowns')
+    logger.debug({ cleaned }, 'Cleaned up user reward cooldowns')
   }
 }
 
