@@ -52,11 +52,6 @@ export async function executeBalance(
   // Fetch balance
   const balanceData = getBalance(db, user.id, serverId ?? undefined, userRoles)
 
-  // Calculate next regen time
-  const nextRegenAt = balanceData.balance < balanceData.maxBalance
-    ? new Date(Date.now() + (1 / balanceData.effectiveRegenRate) * 60 * 60 * 1000)
-    : null
-
   // Check for role bonus and look up the role name
   let roleBonus: { multiplier: number; roleName?: string } | undefined = undefined
   if (balanceData.effectiveRegenRate > balanceData.regenRate && serverId) {
@@ -84,7 +79,6 @@ export async function executeBalance(
     maxBalance: balanceData.maxBalance,
     regenRate: balanceData.regenRate,
     effectiveRegenRate: balanceData.effectiveRegenRate,
-    nextRegenAt,
     roleBonus,
     rewardStatus: {
       rewardsRemaining: rewardStatus.rewardsRemaining,

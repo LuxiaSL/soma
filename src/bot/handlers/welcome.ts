@@ -17,7 +17,7 @@ import type { Database } from 'better-sqlite3'
 import { getOrCreateUser, getOrCreateServer, extractDiscordUserInfo } from '../../services/user.js'
 import { hasBeenWelcomed, markWelcomed, setDmOptIn } from '../../services/preferences.js'
 import { getGlobalConfig, getDefaultServerConfig } from '../../services/config.js'
-import { Colors, Emoji } from '../embeds/builders.js'
+import { Colors, Emoji, formatRegenRate } from '../embeds/builders.js'
 import { logger } from '../../utils/logger.js'
 
 /**
@@ -71,7 +71,7 @@ async function showWelcomeMessage(
         value:
           `• You have **${globalConfig.startingBalance} ichor** to start\n` +
           `• Mentioning AI bots costs ichor\n` +
-          `• Ichor regenerates at **${globalConfig.baseRegenRate}/hour**\n` +
+          `• Ichor regenerates at ${formatRegenRate(globalConfig.baseRegenRate)}\n` +
           `• Max balance: **${globalConfig.maxBalance}** ichor`,
       },
       {

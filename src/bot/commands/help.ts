@@ -16,7 +16,7 @@ import {
 import type { Database } from 'better-sqlite3'
 import { getOrCreateServer } from '../../services/user.js'
 import { getGlobalConfig, getDefaultServerConfig } from '../../services/config.js'
-import { Colors, Emoji } from '../embeds/builders.js'
+import { Colors, Emoji, formatRegenRate } from '../embeds/builders.js'
 
 export const helpCommand = new SlashCommandBuilder()
   .setName('help')
@@ -108,7 +108,7 @@ function createOverviewEmbed(globalConfig: any, serverConfig: any): EmbedBuilder
       {
         name: '📊 Your Economy',
         value:
-          `Regeneration: **${globalConfig.baseRegenRate}/hour**\n` +
+          `Regeneration: ${formatRegenRate(globalConfig.baseRegenRate)}\n` +
           `Maximum balance: **${globalConfig.maxBalance}** ichor\n` +
           `Starting balance: **${globalConfig.startingBalance}** ichor`,
         inline: true,
@@ -244,7 +244,7 @@ function createEconomyEmbed(globalConfig: any): EmbedBuilder {
       {
         name: '⏳ Regeneration',
         value:
-          `Your ichor regenerates automatically at **${globalConfig.baseRegenRate}/hour**.\n` +
+          `Your ichor regenerates automatically at ${formatRegenRate(globalConfig.baseRegenRate)}.\n` +
           `Maximum balance: **${globalConfig.maxBalance}** ichor\n\n` +
           `_Some roles may have faster regeneration rates!_`,
       },

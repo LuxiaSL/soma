@@ -39,6 +39,69 @@ export const Emoji = {
 }
 
 /**
+ * Format time duration in a human-friendly way
+ */
+function formatTimeToFull(hours: number): string {
+  if (hours <= 0) return '✨ Full!'
+  
+  const totalMinutes = hours * 60
+  
+  if (totalMinutes < 1) {
+    // Less than a minute - show seconds
+    const seconds = Math.ceil(totalMinutes * 60)
+    return `~${seconds}s`
+  } else if (totalMinutes < 60) {
+    // Less than an hour - show minutes
+    const minutes = Math.ceil(totalMinutes)
+    return `~${minutes}m`
+  } else if (hours < 24) {
+    // Less than a day - show hours and minutes
+    const h = Math.floor(hours)
+    const m = Math.round((hours - h) * 60)
+    return m > 0 ? `~${h}h ${m}m` : `~${h}h`
+  } else {
+    // More than a day
+    const days = Math.floor(hours / 24)
+    const remainingHours = Math.round(hours % 24)
+    return remainingHours > 0 ? `~${days}d ${remainingHours}h` : `~${days}d`
+  }
+}
+
+/**
+ * Format regen rate smartly - show /min for high rates, /hour for low rates
+ */
+export function formatRegenRate(ratePerHour: number): string {
+  if (ratePerHour >= 60) {
+    // High rate: show per minute
+    const perMin = ratePerHour / 60
+    return `**${perMin.toFixed(1)}**/min`
+  } else if (ratePerHour >= 1) {
+    // Medium rate: show per hour as whole number or 1 decimal
+    return `**${ratePerHour % 1 === 0 ? ratePerHour : ratePerHour.toFixed(1)}**/hour`
+  } else {
+    // Low rate: show per hour with decimals
+    return `**${ratePerHour.toFixed(2)}**/hour`
+  }
+}
+
+/**
+ * Create a visual progress bar for balance
+ */
+function createProgressBar(current: number, max: number, length: number = 10): string {
+  const ratio = Math.min(1, current / max)
+  const filled = Math.round(ratio * length)
+  const empty = length - filled
+  
+  // Use different fill characters based on fullness
+  const fillChar = ratio >= 0.8 ? '█' : ratio >= 0.4 ? '▓' : '░'
+  const emptyChar = '·'
+  
+  const bar = fillChar.repeat(filled) + emptyChar.repeat(empty)
+  const percent = Math.round(ratio * 100)
+  return `\`${bar}\` ${percent}%`
+}
+
+/**
  * Create a balance embed
  */
 export function createBalanceEmbed(data: {
@@ -46,7 +109,6 @@ export function createBalanceEmbed(data: {
   maxBalance: number
   regenRate: number
   effectiveRegenRate: number
-  nextRegenAt: Date | null
   roleBonus?: { multiplier: number; roleName?: string }
   rewardStatus?: {
     rewardsRemaining: number
@@ -55,26 +117,35 @@ export function createBalanceEmbed(data: {
     nextRewardAt: Date | null
   }
 }): EmbedBuilder {
+  // Calculate time to full
+  const deficit = data.maxBalance - data.balance
+  const hoursToFull = deficit > 0 ? deficit / data.effectiveRegenRate : 0
+  const timeToFullStr = formatTimeToFull(hoursToFull)
+  
+  // Create progress bar
+  const progressBar = createProgressBar(data.balance, data.maxBalance)
+  
   const embed = new EmbedBuilder()
     .setColor(Colors.ICHOR_PURPLE)
     .setTitle(`${Emoji.ICHOR} Your Ichor Balance`)
-    .setDescription(`You have **${data.balance.toFixed(1)} ichor**`)
+    .setDescription(
+      `**${data.balance.toFixed(1)}** / ${data.maxBalance} ichor\n` +
+      progressBar
+    )
     .addFields(
       {
         name: `${Emoji.REGEN} Regeneration`,
-        value: `**${data.effectiveRegenRate}**/hour`,
+        value: formatRegenRate(data.effectiveRegenRate),
+        inline: true,
+      },
+      {
+        name: '⏱️ Time to Full',
+        value: data.balance >= data.maxBalance ? '✨ Full!' : timeToFullStr,
         inline: true,
       },
       {
         name: `${Emoji.STATS} Maximum`,
         value: `**${data.maxBalance}**`,
-        inline: true,
-      },
-      {
-        name: '⏱️ Next Regen',
-        value: data.nextRegenAt && data.balance < data.maxBalance
-          ? `<t:${Math.floor(data.nextRegenAt.getTime() / 1000)}:R>`
-          : 'At maximum',
         inline: true,
       }
     )
@@ -389,7 +460,9 @@ export function createInsufficientFundsEmbed(
   currentBalance: number,
   regenRate: number
 ): EmbedBuilder {
-  const timeToAfford = Math.ceil((cost - currentBalance) / regenRate * 60)
+  const deficit = cost - currentBalance
+  const hoursToAfford = deficit / regenRate
+  const timeStr = formatTimeToFull(hoursToAfford)
 
   const embed = new EmbedBuilder()
     .setColor(Colors.DANGER_RED)
@@ -400,7 +473,7 @@ export function createInsufficientFundsEmbed(
     )
     .addFields({
       name: `${Emoji.REGEN} Time to afford`,
-      value: `~${timeToAfford} minutes`,
+      value: timeStr,
       inline: true,
     })
     .setTimestamp()
@@ -417,7 +490,8 @@ export function createLowBalanceEmbed(
   maxBalance: number,
   affordableBots: Array<{ name: string; cost: number }>
 ): EmbedBuilder {
-  const hoursToFull = Math.ceil((maxBalance - balance) / regenRate)
+  const hoursToFull = (maxBalance - balance) / regenRate
+  const timeToFullStr = formatTimeToFull(hoursToFull)
 
   const embed = new EmbedBuilder()
     .setColor(Colors.WARNING_ORANGE)
@@ -435,7 +509,7 @@ export function createLowBalanceEmbed(
       },
       {
         name: `${Emoji.REGEN} Regeneration`,
-        value: `${regenRate}/hour — full recovery in ~${hoursToFull} hours`,
+        value: `${formatRegenRate(regenRate)} — full in ${timeToFullStr}`,
       }
     )
     .setTimestamp()

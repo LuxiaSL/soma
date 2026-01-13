@@ -17,7 +17,7 @@ import { getOrCreateUser, getOrCreateServer, updateServerConfig } from '../../se
 import { updateUserServerRoles, getGlobalEffectiveRegenRate, hasGlobalAdminRole, isAdminUserId } from '../../services/roles.js'
 import { extractDiscordUserInfo } from '../../services/user.js'
 import { generateId } from '../../db/connection.js'
-import { createGrantEmbed, Emoji, Colors } from '../embeds/builders.js'
+import { createGrantEmbed, Emoji, Colors, formatRegenRate } from '../embeds/builders.js'
 import { EmbedBuilder } from 'discord.js'
 import { logger } from '../../utils/logger.js'
 import { getGlobalConfig, getDefaultServerConfig, updateGlobalConfig, getGlobalConfigInfo } from '../../services/config.js'
@@ -831,7 +831,7 @@ async function executeConfigView(
       {
         name: '📊 Global Settings (from environment)',
         value: [
-          `Base Regen Rate: **${globalConfig.baseRegenRate}**/hour`,
+          `Base Regen Rate: ${formatRegenRate(globalConfig.baseRegenRate)}`,
           `Max Balance: **${globalConfig.maxBalance}** ichor`,
           `Starting Balance: **${globalConfig.startingBalance}** ichor`,
         ].join('\n'),
@@ -1163,7 +1163,7 @@ async function executeGlobalView(
       {
         name: '📊 Economy (from environment)',
         value: [
-          `Base Regen Rate: **${config.baseRegenRate}**/hour`,
+          `Base Regen Rate: ${formatRegenRate(config.baseRegenRate)}`,
           `Max Balance: **${config.maxBalance}** ichor`,
           `Starting Balance: **${config.startingBalance}** ichor`,
         ].join('\n'),
