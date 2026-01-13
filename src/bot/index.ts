@@ -61,7 +61,7 @@ export class SomaBot {
 
       // Set up notification handlers for API events (insufficient funds, etc.)
       if (this.eventBus) {
-        setupNotificationHandlers(this.eventBus, this.client)
+        setupNotificationHandlers(this.eventBus, this.client, this.db)
       }
     })
 

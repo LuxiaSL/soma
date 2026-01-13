@@ -94,6 +94,28 @@ CREATE TABLE IF NOT EXISTS user_server_roles (
   PRIMARY KEY (user_id, server_id)
 );
 
+-- User preferences (DM opt-in, welcome status)
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id TEXT PRIMARY KEY REFERENCES users(id),
+  dm_opt_in INTEGER NOT NULL DEFAULT 0,
+  welcomed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- User notifications (in-app inbox for when DMs are disabled)
+CREATE TABLE IF NOT EXISTS user_notifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  action_hint TEXT,
+  action_data TEXT,
+  read INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_transactions_from_user ON transactions(from_user_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_transactions_to_user ON transactions(to_user_id, timestamp);
@@ -102,4 +124,5 @@ CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type, timestamp
 CREATE INDEX IF NOT EXISTS idx_bot_costs_bot ON bot_costs(bot_discord_id);
 CREATE INDEX IF NOT EXISTS idx_role_configs_server ON role_configs(server_id);
 CREATE INDEX IF NOT EXISTS idx_tracked_messages_expires ON tracked_messages(expires_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON user_notifications(user_id, read, created_at DESC);
 `

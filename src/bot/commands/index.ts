@@ -21,6 +21,9 @@ import { costsCommand, executeCosts } from './costs.js'
 import { historyCommand, executeHistory } from './history.js'
 import { leaderboardCommand, executeLeaderboard } from './leaderboard.js'
 import { somaAdminCommand, executeSomaAdmin } from './admin.js'
+import { settingsCommand, executeSettings } from './settings.js'
+import { notificationsCommand, executeNotifications } from './notifications.js'
+import { helpCommand, executeHelp } from './help.js'
 import { handleButton } from '../handlers/buttons.js'
 import { handleAutocomplete } from '../handlers/autocomplete.js'
 
@@ -32,6 +35,9 @@ const commands = [
   historyCommand,
   leaderboardCommand,
   somaAdminCommand,
+  settingsCommand,
+  notificationsCommand,
+  helpCommand,
 ]
 
 /**
@@ -195,6 +201,18 @@ async function handleCommand(
 
     case 'soma':
       await executeSomaAdmin(interaction, db, client)
+      break
+
+    case 'settings':
+      await executeSettings(interaction, db)
+      break
+
+    case 'notifications':
+      await executeNotifications(interaction, db)
+      break
+
+    case 'help':
+      await executeHelp(interaction, db)
       break
 
     default:

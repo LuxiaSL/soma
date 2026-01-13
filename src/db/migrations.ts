@@ -40,6 +40,41 @@ const MIGRATIONS: Migration[] = [
       }
     }
   },
+  {
+    id: '002_add_user_preferences',
+    description: 'Add user_preferences table for DM opt-in and other settings',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_preferences (
+          user_id TEXT PRIMARY KEY REFERENCES users(id),
+          dm_opt_in INTEGER NOT NULL DEFAULT 0,
+          welcomed INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        )
+      `)
+    }
+  },
+  {
+    id: '003_add_user_notifications',
+    description: 'Add user_notifications table for in-app notification inbox',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_notifications (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id),
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          message TEXT NOT NULL,
+          action_hint TEXT,
+          action_data TEXT,
+          read INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now'))
+        )
+      `)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON user_notifications(user_id, read, created_at DESC)`)
+    }
+  },
 ]
 
 /**

@@ -16,6 +16,8 @@ import { getTrackedMessage } from '../../services/tracking.js'
 import { addBalance, transferBalance, getBalance } from '../../services/balance.js'
 import { getOrCreateUser, getServerByDiscordId, extractDiscordUserInfo } from '../../services/user.js'
 import { hasClaimedReward, recordRewardClaim } from '../../services/rewards.js'
+import { isDmOptedIn } from '../../services/preferences.js'
+import { notifyTipReceived } from '../../services/notifications.js'
 import { createTipReceivedEmbed } from '../embeds/builders.js'
 import { sendDM, createViewMessageButton } from '../notifications/dm.js'
 import { logger } from '../../utils/logger.js'
@@ -166,32 +168,63 @@ async function processTip(
 
     // Build message URL
     const messageUrl = `https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`
+    const channelName = channel.name || 'channel'
 
-    // DM recipient about the tip with View Message button
-    const embed = createTipReceivedEmbed(
-      tipper.tag,
-      tipAmount,
-      channel.name || 'channel',
-      result.toBalanceAfter,
-      messageUrl
-    )
+    // Check if recipient has opted into DMs
+    const dmOptedIn = isDmOptedIn(db, recipientUserId)
+    let dmSent = false
 
-    // Add View Message button if we have the guild/channel/message IDs
-    const viewMessageButton = message.guildId && message.channelId && message.id
-      ? createViewMessageButton(message.guildId, message.channelId, message.id)
-      : undefined
+    if (dmOptedIn) {
+      // DM recipient about the tip with View Message button
+      const embed = createTipReceivedEmbed(
+        tipper.tag,
+        tipAmount,
+        channelName,
+        result.toBalanceAfter,
+        messageUrl
+      )
 
-    const dmSent = await sendDM(recipient, {
-      embeds: [embed],
-      components: viewMessageButton ? [viewMessageButton] : [],
-    })
+      // Add View Message button if we have the guild/channel/message IDs
+      const viewMessageButton = message.guildId && message.channelId && message.id
+        ? createViewMessageButton(message.guildId, message.channelId, message.id)
+        : undefined
+
+      dmSent = await sendDM(recipient, {
+        embeds: [embed],
+        components: viewMessageButton ? [viewMessageButton] : [],
+      })
+
+      if (dmSent) {
+        logger.debug({
+          recipientId: recipientDiscordId,
+          amount: tipAmount,
+        }, 'Sent tip received DM')
+      }
+    }
+
+    // If DMs not enabled or failed, store notification in inbox
+    if (!dmSent) {
+      notifyTipReceived(
+        db,
+        recipientUserId,
+        tipper.tag,
+        tipAmount,
+        channelName,
+        messageUrl
+      )
+      
+      logger.debug({
+        recipientId: recipientUserId,
+        dmOptedIn,
+      }, 'Stored tip notification in inbox')
+    }
 
     logger.info({
       tipperId: tipper.id,
       recipientId: recipientDiscordId,
       amount: tipAmount,
       messageId: message.id,
-      dmSent,
+      notificationMethod: dmSent ? 'dm' : 'inbox',
     }, 'Tip processed successfully')
 
   } catch (error: any) {

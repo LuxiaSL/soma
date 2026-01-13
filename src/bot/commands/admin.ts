@@ -521,7 +521,11 @@ async function executeStats(
   const avgBalance = db.prepare(`SELECT AVG(amount) as avg FROM balances`).get() as { avg: number | null }
 
   // Get 24h activity
-  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  // Format to SQLite's datetime format (YYYY-MM-DD HH:MM:SS) to match datetime('now') storage
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    .toISOString()
+    .replace('T', ' ')
+    .replace(/\.\d{3}Z$/, '')
 
   // Get active users in last 24h (users who made any transaction)
   const activeUsers = db.prepare(`

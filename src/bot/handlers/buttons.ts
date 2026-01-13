@@ -28,6 +28,12 @@ import {
 } from '../embeds/builders.js'
 import { getHistoryPage } from '../commands/history.js'
 import { sendDM } from '../notifications/dm.js'
+import { handleSettingsButton } from '../commands/settings.js'
+import { handleNotificationsButton } from '../commands/notifications.js'
+import { handleHelpButton } from '../commands/help.js'
+import { handleWelcomeButton } from '../handlers/welcome.js'
+import { isDmOptedIn } from '../../services/preferences.js'
+import { notifyTransferReceived } from '../../services/notifications.js'
 import { logger } from '../../utils/logger.js'
 
 export async function handleButton(
@@ -81,6 +87,26 @@ export async function handleButton(
   // Transfer cancel
   if (customId === 'transfer_cancel') {
     await handleTransferCancel(interaction)
+    return
+  }
+
+  // Settings buttons
+  if (await handleSettingsButton(customId, interaction, db)) {
+    return
+  }
+
+  // Notifications buttons
+  if (await handleNotificationsButton(customId, interaction, db)) {
+    return
+  }
+
+  // Help navigation buttons
+  if (await handleHelpButton(customId, interaction, db)) {
+    return
+  }
+
+  // Welcome buttons
+  if (await handleWelcomeButton(customId, interaction, db)) {
     return
   }
 
@@ -308,21 +334,44 @@ async function handleTransferConfirm(
       components: [],
     })
 
-    // DM recipient
-    const dmEmbed = createTransferReceivedEmbed(
-      interaction.user.tag,
-      amount,
-      result.toBalanceAfter,
-      note
-    )
+    // Check if recipient has opted into DMs
+    const dmOptedIn = isDmOptedIn(db, recipient.id)
+    let dmSent = false
 
-    const dmSent = await sendDM(recipientDiscord, { embeds: [dmEmbed] })
-
-    if (!dmSent) {
-      logger.info({
-        recipientId,
+    if (dmOptedIn) {
+      // DM recipient
+      const dmEmbed = createTransferReceivedEmbed(
+        interaction.user.tag,
         amount,
-      }, 'Could not DM transfer recipient (DMs disabled)')
+        result.toBalanceAfter,
+        note
+      )
+
+      dmSent = await sendDM(recipientDiscord, { embeds: [dmEmbed] })
+
+      if (dmSent) {
+        logger.debug({
+          recipientId,
+          amount,
+        }, 'Sent transfer received DM')
+      }
+    }
+
+    // If DMs not enabled or failed, store notification in inbox
+    if (!dmSent) {
+      notifyTransferReceived(
+        db,
+        recipient.id,
+        interaction.user.tag,
+        amount,
+        result.toBalanceAfter,
+        note
+      )
+      
+      logger.debug({
+        recipientId: recipient.id,
+        dmOptedIn,
+      }, 'Stored transfer notification in inbox')
     }
 
     logger.info({
@@ -332,6 +381,7 @@ async function handleTransferConfirm(
       note,
       fromBalance: result.fromBalanceAfter,
       toBalance: result.toBalanceAfter,
+      notificationMethod: dmSent ? 'dm' : 'inbox',
     }, 'Transfer completed')
 
   } catch (error: any) {

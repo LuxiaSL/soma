@@ -15,6 +15,7 @@ import { getBalance, getEffectiveRegenRateWithRole } from '../../services/balanc
 import { getOrCreateUser, getOrCreateServer, extractDiscordUserInfo } from '../../services/user.js'
 import { updateUserServerRoles } from '../../services/roles.js'
 import { createBalanceEmbed, createBalanceButtons } from '../embeds/builders.js'
+import { maybeShowWelcome } from '../handlers/welcome.js'
 import { logger } from '../../utils/logger.js'
 
 export const balanceCommand = new SlashCommandBuilder()
@@ -25,6 +26,11 @@ export async function executeBalance(
   interaction: ChatInputCommandInteraction,
   db: Database
 ): Promise<void> {
+  // Check if we should show welcome message (first time user)
+  if (await maybeShowWelcome(interaction, db)) {
+    return // Welcome message was shown, don't continue
+  }
+
   const userId = interaction.user.id
   const serverId = interaction.guildId
 

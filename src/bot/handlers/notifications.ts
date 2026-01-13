@@ -3,12 +3,19 @@
  * 
  * Handles events from the API server to send notifications via Discord
  * Primarily for insufficient funds DM notifications
+ * 
+ * Respects user DM opt-in preferences - falls back to stored notifications
+ * and emoji reactions when DMs are disabled.
  */
 
 import type { Client, TextChannel } from 'discord.js'
+import type { Database } from 'better-sqlite3'
 import type { SomaEventBus, InsufficientFundsEvent } from '../../types/events.js'
 import { createInsufficientFundsEmbed, Emoji } from '../embeds/builders.js'
 import { sendDM, createBalanceCheckButtons } from '../notifications/dm.js'
+import { getOrCreateUser } from '../../services/user.js'
+import { isDmOptedIn } from '../../services/preferences.js'
+import { notifyInsufficientFunds } from '../../services/notifications.js'
 import { logger } from '../../utils/logger.js'
 
 /**
@@ -16,13 +23,14 @@ import { logger } from '../../utils/logger.js'
  */
 export function setupNotificationHandlers(
   eventBus: SomaEventBus,
-  client: Client
+  client: Client,
+  db: Database
 ): void {
   logger.info('Setting up notification event handlers')
 
   eventBus.on('insufficientFunds', async (event: InsufficientFundsEvent) => {
     try {
-      await handleInsufficientFunds(client, event)
+      await handleInsufficientFunds(client, db, event)
     } catch (error) {
       logger.error({ error, event }, 'Failed to handle insufficient funds notification')
     }
@@ -31,12 +39,14 @@ export function setupNotificationHandlers(
 
 /**
  * Handle insufficient funds event:
- * 1. Add 💸 reaction to the triggering message
- * 2. Send DM to user with details and buttons
- * 3. If DM fails, add 📭 reaction instead
+ * 1. Always add 💸 reaction to the triggering message
+ * 2. Check if user has opted into DMs
+ * 3. If opted in, send DM with details
+ * 4. If not opted in (or DM fails), store notification in inbox
  */
 async function handleInsufficientFunds(
   client: Client,
+  db: Database,
   event: InsufficientFundsEvent
 ): Promise<void> {
   logger.debug({
@@ -47,7 +57,7 @@ async function handleInsufficientFunds(
     balance: event.currentBalance,
   }, 'Handling insufficient funds notification')
 
-  // 1. Try to add 💸 reaction to the triggering message
+  // 1. Always add 💸 reaction to the triggering message (universal indicator)
   if (event.channelId && event.messageId) {
     try {
       const channel = await client.channels.fetch(event.channelId)
@@ -64,52 +74,57 @@ async function handleInsufficientFunds(
     }
   }
 
-  // 2. Send DM to user with details
+  // Get internal user ID for preferences check
+  const user = getOrCreateUser(db, event.userDiscordId)
+  const dmOptedIn = isDmOptedIn(db, user.id)
+
+  // 2. If user has opted into DMs, try to send DM
   let dmSent = false
-  try {
-    const user = await client.users.fetch(event.userDiscordId)
-    
-    const embed = createInsufficientFundsEmbed(
-      event.botName,
-      event.cost,
-      event.currentBalance,
-      event.regenRate
-    )
-    
-    const buttons = createBalanceCheckButtons()
-    
-    dmSent = await sendDM(user, {
-      embeds: [embed],
-      components: [buttons],
-    })
-
-    if (dmSent) {
-      logger.info({
-        userId: event.userDiscordId,
-        botName: event.botName,
-        cost: event.cost,
-        balance: event.currentBalance,
-      }, 'Sent insufficient funds DM')
-    }
-  } catch (error) {
-    logger.error({ error, userId: event.userDiscordId }, 'Failed to fetch user for DM')
-  }
-
-  // 3. If DM failed (user has DMs disabled), add 📭 reaction instead
-  if (!dmSent && event.channelId && event.messageId) {
+  if (dmOptedIn) {
     try {
-      const channel = await client.channels.fetch(event.channelId)
-      if (channel?.isTextBased()) {
-        const message = await (channel as TextChannel).messages.fetch(event.messageId)
-        await message.react(Emoji.DM_FAILED) // 📭
-        logger.debug({
-          messageId: event.messageId,
-          emoji: Emoji.DM_FAILED,
-        }, 'Added DM failed reaction (user has DMs disabled)')
+      const discordUser = await client.users.fetch(event.userDiscordId)
+      
+      const embed = createInsufficientFundsEmbed(
+        event.botName,
+        event.cost,
+        event.currentBalance,
+        event.regenRate
+      )
+      
+      const buttons = createBalanceCheckButtons()
+      
+      dmSent = await sendDM(discordUser, {
+        embeds: [embed],
+        components: [buttons],
+      })
+
+      if (dmSent) {
+        logger.info({
+          userId: event.userDiscordId,
+          botName: event.botName,
+          cost: event.cost,
+          balance: event.currentBalance,
+        }, 'Sent insufficient funds DM')
       }
     } catch (error) {
-      logger.error({ error, messageId: event.messageId }, 'Failed to add DM failed reaction')
+      logger.error({ error, userId: event.userDiscordId }, 'Failed to send insufficient funds DM')
     }
+  }
+
+  // 3. If DMs not enabled or DM failed, store notification in inbox
+  if (!dmSent) {
+    notifyInsufficientFunds(
+      db,
+      user.id,
+      event.botName,
+      event.cost,
+      event.currentBalance
+    )
+    
+    logger.debug({
+      userId: user.id,
+      dmOptedIn,
+    }, 'Stored insufficient funds notification in inbox')
   }
 }
 
