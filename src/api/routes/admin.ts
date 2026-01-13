@@ -237,9 +237,38 @@ export function createAdminRouter(db: Database): Router {
   // Update global configuration
   router.post('/admin/global-config', (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { rewardCooldownMinutes, maxDailyRewards, globalCostMultiplier, modifiedBy } = req.body
+      const { 
+        // Base economy settings
+        baseRegenRate,
+        maxBalance,
+        startingBalance,
+        // Runtime settings
+        rewardCooldownMinutes, 
+        maxDailyRewards, 
+        globalCostMultiplier, 
+        modifiedBy 
+      } = req.body
 
-      // Validate inputs
+      // Validate base economy settings
+      if (baseRegenRate !== undefined) {
+        if (typeof baseRegenRate !== 'number' || baseRegenRate < 0.1 || baseRegenRate > 1000) {
+          throw new ValidationError('baseRegenRate must be between 0.1 and 1000', 'baseRegenRate')
+        }
+      }
+
+      if (maxBalance !== undefined) {
+        if (typeof maxBalance !== 'number' || maxBalance < 1 || maxBalance > 100000) {
+          throw new ValidationError('maxBalance must be between 1 and 100000', 'maxBalance')
+        }
+      }
+
+      if (startingBalance !== undefined) {
+        if (typeof startingBalance !== 'number' || startingBalance < 0 || startingBalance > 10000) {
+          throw new ValidationError('startingBalance must be between 0 and 10000', 'startingBalance')
+        }
+      }
+
+      // Validate runtime settings
       if (rewardCooldownMinutes !== undefined) {
         if (typeof rewardCooldownMinutes !== 'number' || rewardCooldownMinutes < 0 || rewardCooldownMinutes > 1440) {
           throw new ValidationError('rewardCooldownMinutes must be between 0 and 1440 (24 hours)', 'rewardCooldownMinutes')
@@ -258,7 +287,18 @@ export function createAdminRouter(db: Database): Router {
         }
       }
 
-      const updates: { rewardCooldownMinutes?: number; maxDailyRewards?: number; globalCostMultiplier?: number } = {}
+      const updates: Partial<{
+        baseRegenRate: number
+        maxBalance: number
+        startingBalance: number
+        rewardCooldownMinutes: number
+        maxDailyRewards: number
+        globalCostMultiplier: number
+      }> = {}
+      
+      if (baseRegenRate !== undefined) updates.baseRegenRate = baseRegenRate
+      if (maxBalance !== undefined) updates.maxBalance = maxBalance
+      if (startingBalance !== undefined) updates.startingBalance = startingBalance
       if (rewardCooldownMinutes !== undefined) updates.rewardCooldownMinutes = rewardCooldownMinutes
       if (maxDailyRewards !== undefined) updates.maxDailyRewards = maxDailyRewards
       if (globalCostMultiplier !== undefined) updates.globalCostMultiplier = globalCostMultiplier

@@ -140,6 +140,29 @@ const MIGRATIONS: Migration[] = [
       `)
     }
   },
+  {
+    id: '007_add_base_economy_settings',
+    description: 'Add base_regen_rate, max_balance, starting_balance to global_config for runtime configuration',
+    up: (db) => {
+      const tableInfo = db.prepare(`PRAGMA table_info(global_config)`).all() as Array<{ name: string }>
+      const existingColumns = new Set(tableInfo.map(c => c.name))
+
+      // Add base_regen_rate (ichor per hour, default 5)
+      if (!existingColumns.has('base_regen_rate')) {
+        db.exec(`ALTER TABLE global_config ADD COLUMN base_regen_rate REAL NOT NULL DEFAULT 5.0`)
+      }
+
+      // Add max_balance (maximum storable ichor, default 100)
+      if (!existingColumns.has('max_balance')) {
+        db.exec(`ALTER TABLE global_config ADD COLUMN max_balance REAL NOT NULL DEFAULT 100.0`)
+      }
+
+      // Add starting_balance (initial ichor for new users, default 50)
+      if (!existingColumns.has('starting_balance')) {
+        db.exec(`ALTER TABLE global_config ADD COLUMN starting_balance REAL NOT NULL DEFAULT 50.0`)
+      }
+    }
+  },
 ]
 
 /**

@@ -134,7 +134,7 @@ function createCommandsEmbed(): EmbedBuilder {
       {
         name: '📊 Information',
         value:
-          '`/balance` — View your current ichor balance and regen rate\n' +
+          '`/balance` — View ichor balance, regen rate, and free rewards remaining\n' +
           '`/costs` — See what each bot costs to activate\n' +
           '`/history` — View your transaction history\n' +
           '`/leaderboard` — See top ichor holders',
@@ -146,22 +146,33 @@ function createCommandsEmbed(): EmbedBuilder {
           '_You can also tip users by reacting to their bot messages!_',
       },
       {
-        name: '⚙️ Settings & Help',
+        name: '⚙️ Settings & Notifications',
         value:
           '`/settings view` — View your current preferences\n' +
           '`/settings dm` — Toggle DM notifications on/off\n' +
           '`/notifications` — View your notification inbox\n' +
+          '`/notifications unread:True` — Show only unread notifications\n' +
           '`/help [topic]` — Get help on a specific topic',
       },
       {
-        name: '🔧 Admin Commands',
+        name: '🔧 Admin Commands (`/soma`)',
         value:
-          '_Server administrators have access to `/soma` commands for:_\n' +
-          '• Granting/revoking ichor\n' +
-          '• Setting bot costs\n' +
-          '• Configuring role multipliers\n' +
-          '• Customizing reward/tip emoji\n' +
-          '• Global: cost multiplier, reward cooldown & daily limits',
+          '**User Management:**\n' +
+          '`grant` / `revoke` — Add or remove ichor from users\n' +
+          '`update-user` — Refresh a user\'s role cache\n' +
+          '`stats` — View server-wide statistics\n\n' +
+          '**Bot & Role Config:**\n' +
+          '`set-cost` — Set bot activation costs\n' +
+          '`set-role` — Configure role multipliers\n\n' +
+          '**Server Config:**\n' +
+          '`config-view` — View current server settings\n' +
+          '`config-rewards-emoji` / `config-rewards-amount`\n' +
+          '`config-tip-emoji` / `config-tip-amount`\n' +
+          '`config-reset` — Reset to defaults\n\n' +
+          '**Global Config:**\n' +
+          '`global-view` — View global settings\n' +
+          '`global-cost-multiplier` — Adjust all bot costs\n' +
+          '`global-reward-cooldown` / `global-max-daily-rewards`',
       }
     )
 }
@@ -180,16 +191,24 @@ function createReactionsEmbed(serverConfig: any): EmbedBuilder {
           `React with ${serverConfig.tipEmoji} to a bot's message to **tip the person who triggered it**.\n\n` +
           `• Costs you **${serverConfig.tipAmount} ichor**\n` +
           `• That ichor goes directly to the message author\n` +
-          `• Great way to reward helpful AI responses!`,
+          `• They'll be notified via DM or their inbox`,
       },
       {
-        name: `${Emoji.REWARD} Rewards (${serverConfig.rewardEmoji.join(' ')})`,
+        name: `${Emoji.REWARD} Free Rewards (${serverConfig.rewardEmoji.join(' ')})`,
         value:
           `React with any of these emoji to **give a free reward**:\n` +
           `${serverConfig.rewardEmoji.join(' ')}\n\n` +
           `• Costs you nothing!\n` +
           `• Gives **${serverConfig.rewardAmount} ichor** to the message author\n` +
-          `• One reward per message per person`,
+          `• One reward per message per person\n` +
+          `• Subject to daily limits and cooldowns`,
+      },
+      {
+        name: '⏳ Reward Limits',
+        value:
+          'Free rewards have daily limits and cooldowns to prevent spam.\n' +
+          'Check `/balance` to see your remaining rewards and cooldown status.\n' +
+          '_Admins can adjust these with `/soma global-*` commands._',
       },
       {
         name: '💡 Other Reactions You Might See',
@@ -198,10 +217,22 @@ function createReactionsEmbed(serverConfig: any): EmbedBuilder {
           `${Emoji.DM_FAILED} **DM unavailable** — Soma couldn't send you a DM (check \`/notifications\` instead)`,
       }
     )
-    .setFooter({ text: 'Server admins can customize these emoji with /soma config-*' })
+    .setFooter({ text: 'Server admins can customize emoji with /soma config-* commands' })
 }
 
 function createEconomyEmbed(globalConfig: any): EmbedBuilder {
+  // Format daily rewards display
+  const dailyRewardsStr = globalConfig.maxDailyRewards === 0 
+    ? 'unlimited' 
+    : `**${globalConfig.maxDailyRewards}**`
+  
+  // Format cooldown display
+  const cooldownStr = globalConfig.rewardCooldownMinutes === 0
+    ? 'No cooldown between rewards.'
+    : globalConfig.rewardCooldownMinutes === 1
+      ? 'There\'s a **1 minute** cooldown between rewards.'
+      : `There's a **${globalConfig.rewardCooldownMinutes} minute** cooldown between rewards.`
+
   const embed = new EmbedBuilder()
     .setColor(Colors.ICHOR_PURPLE)
     .setTitle('💰 Ichor Economy')
@@ -239,10 +270,9 @@ function createEconomyEmbed(globalConfig: any): EmbedBuilder {
       {
         name: `${Emoji.REWARD} Free Rewards`,
         value:
-          `You can give **${globalConfig.maxDailyRewards || '∞'} free rewards** per day.\n` +
-          (globalConfig.rewardCooldownMinutes > 0 
-            ? `There's a **${globalConfig.rewardCooldownMinutes} minute** cooldown between rewards.\n`
-            : '') +
+          `You can give ${dailyRewardsStr} free rewards per day.\n` +
+          `${cooldownStr}\n` +
+          `One reward per message per person (permanent).\n\n` +
           `_Check your remaining rewards with_ \`/balance\``,
       },
       {
@@ -281,7 +311,8 @@ function createSettingsEmbed(): EmbedBuilder {
         value:
           'By default, Soma **does not send DMs**. All notifications go to your inbox.\n\n' +
           'If you prefer DM notifications, you can enable them:\n' +
-          '`/settings dm` — Toggle DMs on/off\n\n' +
+          '`/settings dm` — Toggle DMs on/off\n' +
+          '`/settings view` — See your current preferences\n\n' +
           'When DMs are enabled, you\'ll receive messages for:\n' +
           '• Tips received\n' +
           '• Transfers received\n' +
@@ -293,7 +324,20 @@ function createSettingsEmbed(): EmbedBuilder {
           'When DMs are disabled (default), notifications are stored in your inbox.\n\n' +
           '`/notifications` — View your inbox\n' +
           '`/notifications unread:True` — Show only unread\n\n' +
-          'Each notification includes an action hint (like `/balance`) so you know what to do.',
+          'Features:\n' +
+          '• Pagination for long histories\n' +
+          '• Mark all as read button\n' +
+          '• Filter toggle between all/unread\n' +
+          '• Action hints to guide next steps',
+      },
+      {
+        name: '🔔 Notification Types',
+        value:
+          '💸 **Insufficient funds** — You tried to activate a bot without enough ichor\n' +
+          '💜 **Transfer received** — Someone sent you ichor\n' +
+          '🫀 **Tip received** — Someone tipped your bot message\n' +
+          '⭐ **Reward received** — Someone rewarded your bot message\n' +
+          '🎁 **Grant received** — An admin granted you ichor',
       },
       {
         name: '💡 Tips',

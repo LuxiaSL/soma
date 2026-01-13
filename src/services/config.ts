@@ -3,8 +3,10 @@
  * Provides access to global config values (regen rate, max balance, etc.)
  * 
  * Configuration sources:
- * - Environment variables: base regen rate, max balance, starting balance (startup-only)
- * - Database: reward cooldown, global cost multiplier (runtime-configurable)
+ * - Database (primary): All settings are runtime-configurable via global_config table
+ * - Environment variables (fallback): Used as initial values if DB has defaults
+ * 
+ * Priority: DB value > ENV value > hardcoded default
  */
 
 import type { Database } from 'better-sqlite3'
@@ -12,11 +14,8 @@ import type { GlobalConfig, ServerConfig } from '../types/index.js'
 import { DEFAULT_GLOBAL_CONFIG, DEFAULT_SERVER_CONFIG } from '../types/index.js'
 import { logger } from '../utils/logger.js'
 
-/** Cached environment config (loaded once at startup) */
-let cachedEnvConfig: Pick<GlobalConfig, 'baseRegenRate' | 'maxBalance' | 'startingBalance'> | null = null
-
-/** Cached runtime config (loaded from database, can be updated) */
-let cachedRuntimeConfig: Pick<GlobalConfig, 'rewardCooldownMinutes' | 'maxDailyRewards' | 'globalCostMultiplier'> | null = null
+/** Cached full config (loaded from database, can be updated) */
+let cachedConfig: GlobalConfig | null = null
 
 /** Database reference for runtime config */
 let configDb: Database | null = null
@@ -26,51 +25,49 @@ let configDb: Database | null = null
  */
 export function setConfigDatabase(db: Database): void {
   configDb = db
-  cachedRuntimeConfig = null  // Clear cache to reload from DB
+  cachedConfig = null  // Clear cache to reload from DB
 }
 
 /**
- * Load environment-based config (called once at startup)
+ * Clear the config cache (call after updates)
  */
-function loadEnvConfig(): Pick<GlobalConfig, 'baseRegenRate' | 'maxBalance' | 'startingBalance'> {
-  if (cachedEnvConfig) {
-    return cachedEnvConfig
-  }
+export function clearConfigCache(): void {
+  cachedConfig = null
+}
 
-  const baseRegenRate = parseFloat(process.env.SOMA_BASE_REGEN_RATE || '') 
+/**
+ * Get environment variable fallbacks (used when DB has default values)
+ */
+function getEnvFallbacks(): Partial<GlobalConfig> {
+  const baseRegenRate = parseFloat(process.env.SOMA_BASE_REGEN_RATE || '')
   const maxBalance = parseFloat(process.env.SOMA_MAX_BALANCE || '')
   const startingBalance = parseFloat(process.env.SOMA_STARTING_BALANCE || '')
 
-  cachedEnvConfig = {
-    baseRegenRate: !isNaN(baseRegenRate) && baseRegenRate > 0 
-      ? baseRegenRate 
-      : DEFAULT_GLOBAL_CONFIG.baseRegenRate,
-    maxBalance: !isNaN(maxBalance) && maxBalance > 0 
-      ? maxBalance 
-      : DEFAULT_GLOBAL_CONFIG.maxBalance,
-    startingBalance: !isNaN(startingBalance) && startingBalance >= 0 
-      ? startingBalance 
-      : DEFAULT_GLOBAL_CONFIG.startingBalance,
+  return {
+    baseRegenRate: !isNaN(baseRegenRate) && baseRegenRate > 0 ? baseRegenRate : undefined,
+    maxBalance: !isNaN(maxBalance) && maxBalance > 0 ? maxBalance : undefined,
+    startingBalance: !isNaN(startingBalance) && startingBalance >= 0 ? startingBalance : undefined,
   }
-
-  return cachedEnvConfig
 }
 
 /**
- * Load runtime config from database
+ * Load full config from database
+ * Falls back to env vars, then hardcoded defaults
  */
-function loadRuntimeConfig(): Pick<GlobalConfig, 'rewardCooldownMinutes' | 'maxDailyRewards' | 'globalCostMultiplier'> {
-  if (cachedRuntimeConfig) {
-    return cachedRuntimeConfig
+function loadConfig(): GlobalConfig {
+  if (cachedConfig) {
+    return cachedConfig
   }
 
+  const envFallbacks = getEnvFallbacks()
+
   if (!configDb) {
-    // Return defaults if no database connection
-    return {
-      rewardCooldownMinutes: DEFAULT_GLOBAL_CONFIG.rewardCooldownMinutes,
-      maxDailyRewards: DEFAULT_GLOBAL_CONFIG.maxDailyRewards,
-      globalCostMultiplier: DEFAULT_GLOBAL_CONFIG.globalCostMultiplier,
+    // Return defaults with env overrides if no database connection
+    cachedConfig = {
+      ...DEFAULT_GLOBAL_CONFIG,
+      ...envFallbacks,
     }
+    return cachedConfig
   }
 
   try {
@@ -80,6 +77,19 @@ function loadRuntimeConfig(): Pick<GlobalConfig, 'rewardCooldownMinutes' | 'maxD
 
     // Build query based on available columns
     const selectCols: string[] = []
+    
+    // Base economy settings (new in migration 007)
+    if (columns.has('base_regen_rate')) {
+      selectCols.push('base_regen_rate')
+    }
+    if (columns.has('max_balance')) {
+      selectCols.push('max_balance')
+    }
+    if (columns.has('starting_balance')) {
+      selectCols.push('starting_balance')
+    }
+    
+    // Runtime settings
     if (columns.has('reward_cooldown_minutes')) {
       selectCols.push('reward_cooldown_minutes')
     } else if (columns.has('reward_cooldown_seconds')) {
@@ -100,50 +110,76 @@ function loadRuntimeConfig(): Pick<GlobalConfig, 'rewardCooldownMinutes' | 'maxD
     const row = configDb.prepare(`
       SELECT ${selectCols.join(', ')}
       FROM global_config WHERE id = 'global'
-    `).get() as { reward_cooldown_minutes?: number; max_daily_rewards?: number; global_cost_multiplier?: number } | undefined
+    `).get() as {
+      base_regen_rate?: number
+      max_balance?: number
+      starting_balance?: number
+      reward_cooldown_minutes?: number
+      max_daily_rewards?: number
+      global_cost_multiplier?: number
+    } | undefined
 
-    cachedRuntimeConfig = {
+    // Build config with priority: DB value > ENV fallback > hardcoded default
+    // DB values always win if present (even if they match the default - admin may have explicitly set them)
+    // ENV is only used for initial bootstrap before any admin changes
+    cachedConfig = {
+      // Base economy settings: DB > ENV > default
+      baseRegenRate: row?.base_regen_rate ?? envFallbacks.baseRegenRate ?? DEFAULT_GLOBAL_CONFIG.baseRegenRate,
+      maxBalance: row?.max_balance ?? envFallbacks.maxBalance ?? DEFAULT_GLOBAL_CONFIG.maxBalance,
+      startingBalance: row?.starting_balance ?? envFallbacks.startingBalance ?? DEFAULT_GLOBAL_CONFIG.startingBalance,
+      // Runtime settings: DB > default
       rewardCooldownMinutes: row?.reward_cooldown_minutes ?? DEFAULT_GLOBAL_CONFIG.rewardCooldownMinutes,
       maxDailyRewards: row?.max_daily_rewards ?? DEFAULT_GLOBAL_CONFIG.maxDailyRewards,
       globalCostMultiplier: row?.global_cost_multiplier ?? DEFAULT_GLOBAL_CONFIG.globalCostMultiplier,
     }
   } catch (error) {
-    logger.warn({ error }, 'Failed to load runtime config from database, using defaults')
-    cachedRuntimeConfig = {
-      rewardCooldownMinutes: DEFAULT_GLOBAL_CONFIG.rewardCooldownMinutes,
-      maxDailyRewards: DEFAULT_GLOBAL_CONFIG.maxDailyRewards,
-      globalCostMultiplier: DEFAULT_GLOBAL_CONFIG.globalCostMultiplier,
+    logger.warn({ error }, 'Failed to load config from database, using defaults')
+    cachedConfig = {
+      ...DEFAULT_GLOBAL_CONFIG,
+      ...envFallbacks,
     }
   }
 
-  return cachedRuntimeConfig
+  return cachedConfig
 }
 
 /**
  * Get global configuration
- * Combines environment config with runtime config from database
+ * All settings are now runtime-configurable via database
  */
 export function getGlobalConfig(): GlobalConfig {
-  const envConfig = loadEnvConfig()
-  const runtimeConfig = loadRuntimeConfig()
-
-  return {
-    ...envConfig,
-    ...runtimeConfig,
-  }
+  return loadConfig()
 }
 
 /**
- * Update runtime global config (stores in database)
+ * Update global config (stores in database)
+ * Now supports all settings including base economy values
  */
 export function updateGlobalConfig(
   db: Database,
-  updates: Partial<Pick<GlobalConfig, 'rewardCooldownMinutes' | 'maxDailyRewards' | 'globalCostMultiplier'>>,
+  updates: Partial<GlobalConfig>,
   modifiedBy?: string
 ): GlobalConfig {
   const fields: string[] = []
   const values: (number | string)[] = []
 
+  // Base economy settings
+  if (updates.baseRegenRate !== undefined) {
+    fields.push('base_regen_rate = ?')
+    values.push(updates.baseRegenRate)
+  }
+
+  if (updates.maxBalance !== undefined) {
+    fields.push('max_balance = ?')
+    values.push(updates.maxBalance)
+  }
+
+  if (updates.startingBalance !== undefined) {
+    fields.push('starting_balance = ?')
+    values.push(updates.startingBalance)
+  }
+
+  // Runtime settings
   if (updates.rewardCooldownMinutes !== undefined) {
     fields.push('reward_cooldown_minutes = ?')
     values.push(updates.rewardCooldownMinutes)
@@ -173,7 +209,7 @@ export function updateGlobalConfig(
   `).run(...values)
 
   // Clear cache to reload fresh values
-  cachedRuntimeConfig = null
+  clearConfigCache()
 
   logger.info({ updates, modifiedBy }, 'Updated global config')
 
