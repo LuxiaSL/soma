@@ -35,6 +35,8 @@ export function setupNotificationHandlers(
       logger.error({ error, event }, 'Failed to handle insufficient funds notification')
     }
   })
+
+  logger.info('Notification event handlers ready - bot is now fully operational')
 }
 
 /**

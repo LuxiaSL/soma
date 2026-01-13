@@ -61,6 +61,10 @@ export async function registerCommands(token: string): Promise<void> {
     // Check for dev guild (instant registration for testing)
     const devGuildId = process.env.SOMA_DEV_GUILD_ID
 
+    // Log which commands we're registering
+    const commandNames = commandData.map((c: any) => c.name)
+    logger.info({ commands: commandNames }, 'Commands to register')
+
     if (devGuildId) {
       logger.info({ 
         commandCount: commandData.length,
@@ -68,29 +72,33 @@ export async function registerCommands(token: string): Promise<void> {
       }, 'Registering slash commands to dev guild (instant)...')
 
       // Register to dev guild
-      await rest.put(Routes.applicationGuildCommands(clientId, devGuildId), {
+      const result = await rest.put(Routes.applicationGuildCommands(clientId, devGuildId), {
         body: commandData,
-      })
+      }) as any[]
+
+      logger.info({ 
+        guildId: devGuildId,
+        registeredCount: result.length,
+        registeredCommands: result.map(c => c.name),
+      }, 'Successfully registered slash commands to dev guild')
 
       // Clear global commands to prevent duplicates
       logger.info('Clearing global commands to prevent duplicates...')
       await rest.put(Routes.applicationCommands(clientId), {
         body: [],
       })
-
-      logger.info({ guildId: devGuildId }, 'Successfully registered slash commands to dev guild')
     } else {
       logger.info({ commandCount: commandData.length }, 'Registering slash commands globally...')
 
       // Register globally (takes ~1 hour to propagate)
-      await rest.put(Routes.applicationCommands(clientId), {
+      const result = await rest.put(Routes.applicationCommands(clientId), {
         body: commandData,
-      })
+      }) as any[]
 
-      // Clear any dev guild commands if we know the guild ID from previous runs
-      // Users should manually clear guild commands if switching from dev to prod
-      
-      logger.info('Successfully registered slash commands globally (may take up to 1 hour to propagate)')
+      logger.info({ 
+        registeredCount: result.length,
+        registeredCommands: result.map(c => c.name),
+      }, 'Successfully registered slash commands globally (may take up to 1 hour to propagate)')
       logger.info('Note: If you see duplicate commands, clear guild commands with SOMA_CLEAR_GUILD_COMMANDS=<guildId>')
     }
 
