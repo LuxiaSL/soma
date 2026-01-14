@@ -312,6 +312,65 @@ export function deductBalance(
 }
 
 /**
+ * Deduct credits from a user (simple version for bounty stars and other non-bot deductions)
+ * The cost goes to void (deflationary - not transferred to anyone)
+ */
+export function deductBalanceSimple(
+  db: Database,
+  userId: string,
+  amount: number,
+  serverId: string | null,
+  type: 'bounty_star' | 'spend',
+  metadata?: Record<string, unknown>
+): { balanceAfter: number; transactionId: string } {
+  return withTransaction(db, () => {
+    const globalConfig = getGlobalConfig()
+
+    // Apply regen first
+    const currentBalance = applyRegen(
+      db,
+      userId,
+      globalConfig.baseRegenRate,
+      globalConfig.maxBalance
+    )
+
+    if (currentBalance < amount) {
+      throw new InsufficientBalanceError(amount, currentBalance)
+    }
+
+    const newBalance = currentBalance - amount
+
+    // Update balance
+    db.prepare(`
+      UPDATE balances SET amount = ? WHERE user_id = ?
+    `).run(newBalance, userId)
+
+    // Log transaction
+    const transaction = createTransaction(db, {
+      serverId,
+      type: 'spend', // Use 'spend' type for transaction logging
+      fromUserId: userId,
+      toUserId: null,
+      amount: -amount,
+      balanceAfter: newBalance,
+      metadata: { ...metadata, subtype: type },
+    })
+
+    logger.info({
+      userId,
+      amount,
+      balanceAfter: newBalance,
+      type,
+    }, 'Deducted balance (simple)')
+
+    return {
+      balanceAfter: newBalance,
+      transactionId: transaction.id,
+    }
+  })
+}
+
+/**
  * Add credits to a user (for grants, rewards, transfers)
  */
 export function addBalance(

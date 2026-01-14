@@ -448,6 +448,30 @@ export function createTipReceivedEmbed(
 }
 
 /**
+ * Create bounty earned embed (for DMs when bounty tier is reached)
+ */
+export function createBountyEarnedEmbed(
+  amount: number,
+  starCount: number,
+  channelName: string,
+  newBalance: number,
+  _messageUrl: string
+): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(Colors.SUCCESS_GREEN)
+    .setTitle(`${Emoji.REWARD} Bounty Earned!`)
+    .setDescription(
+      `Your message in **#${channelName}** reached **${starCount} ⭐**!\n` +
+      `You earned **${amount} ichor** bounty.`
+    )
+    .addFields({
+      name: 'Your new balance',
+      value: `**${newBalance.toFixed(1)} ichor**`,
+    })
+    .setTimestamp()
+}
+
+/**
  * Create insufficient funds embed (for DMs)
  */
 export function createInsufficientFundsEmbed(

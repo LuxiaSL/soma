@@ -25,7 +25,15 @@ export type TransactionType =
 export type TriggerType = 'mention' | 'reply' | 'm_continue'
 
 /**
- * Server-specific configuration (rewards, tips)
+ * Bounty tier configuration
+ */
+export interface BountyTier {
+  threshold: number    // Number of stars needed to trigger this tier
+  reward: number       // Ichor rewarded to message author when tier is reached
+}
+
+/**
+ * Server-specific configuration (rewards, tips, bounties)
  */
 export interface ServerConfig {
   name?: string              // Discord server name (for display)
@@ -33,6 +41,10 @@ export interface ServerConfig {
   rewardAmount: number       // Ichor per reward reaction
   tipEmoji: string           // Single emoji for tipping
   tipAmount: number          // Ichor transferred per tip
+  // Bounty system
+  bountyEmoji?: string       // Single emoji for paid bounty stars (default: '⭐')
+  bountyStarCost?: number    // Ichor cost per star reaction (default: 50)
+  bountyTiers?: BountyTier[] // Tier thresholds and rewards (default: [{4, 500}, {7, 1500}])
   lastModifiedBy?: string    // Discord user ID who last modified config
   lastModifiedAt?: string    // ISO timestamp of last modification
 }
@@ -79,11 +91,22 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
 }
 
 /**
+ * Default bounty tiers
+ */
+export const DEFAULT_BOUNTY_TIERS: BountyTier[] = [
+  { threshold: 4, reward: 500 },
+  { threshold: 7, reward: 1500 },
+]
+
+/**
  * Default server configuration values
  */
 export const DEFAULT_SERVER_CONFIG: ServerConfig = {
-  rewardEmoji: ['⭐', '🔥', '💯', '👏'],
+  rewardEmoji: ['🔥'],
   rewardAmount: 1,
   tipEmoji: '🫀',
   tipAmount: 5,
+  bountyEmoji: '⭐',
+  bountyStarCost: 50,
+  bountyTiers: DEFAULT_BOUNTY_TIERS,
 }

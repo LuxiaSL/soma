@@ -208,6 +208,38 @@ const MIGRATIONS: Migration[] = [
       }
     }
   },
+  {
+    id: '010_add_bounty_system',
+    description: 'Add bounty system tables for paid star reactions with tiered rewards',
+    up: (db) => {
+      // Table to track bounty stars on messages
+      // star_count: total stars on this message
+      // tiers_claimed: JSON array of tier indices that have been paid out (e.g., [0, 1] means tiers 0 and 1 claimed)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS message_bounties (
+          message_id TEXT PRIMARY KEY,
+          star_count INTEGER NOT NULL DEFAULT 0,
+          tiers_claimed TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT DEFAULT (datetime('now'))
+        )
+      `)
+
+      // Table to track individual star contributions (who starred what)
+      // Prevents double-starring and provides audit trail
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS bounty_stars (
+          user_id TEXT NOT NULL REFERENCES users(id),
+          message_id TEXT NOT NULL,
+          cost_paid REAL NOT NULL,
+          created_at TEXT DEFAULT (datetime('now')),
+          PRIMARY KEY (user_id, message_id)
+        )
+      `)
+
+      // Index for looking up all stars on a message
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_bounty_stars_message ON bounty_stars(message_id)`)
+    }
+  },
 ]
 
 /**

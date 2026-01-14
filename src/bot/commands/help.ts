@@ -28,6 +28,7 @@ export const helpCommand = new SlashCommandBuilder()
       .addChoices(
         { name: '📖 Overview', value: 'overview' },
         { name: '⚡ Commands', value: 'commands' },
+        { name: '⭐ Bounty System', value: 'bounty' },
         { name: '😀 Emoji Reactions', value: 'reactions' },
         { name: '💰 Ichor Economy', value: 'economy' },
         { name: '⚙️ Settings', value: 'settings' },
@@ -55,27 +56,31 @@ export async function executeHelp(
   switch (topic) {
     case 'overview':
       embed = createOverviewEmbed(globalConfig, serverConfig)
-      components = [createHelpNavButtons('overview')]
+      components = createHelpNavRows('overview')
       break
     case 'commands':
       embed = createCommandsEmbed()
-      components = [createHelpNavButtons('commands')]
+      components = createHelpNavRows('commands')
+      break
+    case 'bounty':
+      embed = createBountyEmbed(serverConfig)
+      components = createHelpNavRows('bounty')
       break
     case 'reactions':
       embed = createReactionsEmbed(serverConfig)
-      components = [createHelpNavButtons('reactions')]
+      components = createHelpNavRows('reactions')
       break
     case 'economy':
       embed = createEconomyEmbed(globalConfig)
-      components = [createHelpNavButtons('economy')]
+      components = createHelpNavRows('economy')
       break
     case 'settings':
       embed = createSettingsEmbed()
-      components = [createHelpNavButtons('settings')]
+      components = createHelpNavRows('settings')
       break
     default:
       embed = createOverviewEmbed(globalConfig, serverConfig)
-      components = [createHelpNavButtons('overview')]
+      components = createHelpNavRows('overview')
   }
 
   await interaction.reply({
@@ -118,7 +123,7 @@ function createOverviewEmbed(globalConfig: any, serverConfig: any): EmbedBuilder
         value:
           `Reward emoji: ${serverConfig.rewardEmoji.join(' ')}\n` +
           `Tip emoji: ${serverConfig.tipEmoji}\n` +
-          `Tip amount: ${serverConfig.tipAmount} ichor`,
+          `Bounty emoji: ${serverConfig.bountyEmoji || '⭐'}`,
         inline: true,
       }
     )
@@ -169,6 +174,7 @@ function createCommandsEmbed(): EmbedBuilder {
           '`config-view` — View current server settings\n' +
           '`config-rewards-emoji` / `config-rewards-amount`\n' +
           '`config-tip-emoji` / `config-tip-amount`\n' +
+          '`config-bounty-emoji` / `config-bounty-cost` / `config-bounty-tiers`\n' +
           '`config-reset` — Reset to defaults\n\n' +
           '**Global Config:**\n' +
           '`global-view` — View global settings\n' +
@@ -179,14 +185,82 @@ function createCommandsEmbed(): EmbedBuilder {
     )
 }
 
+function createBountyEmbed(serverConfig: any): EmbedBuilder {
+  const bountyEmoji = serverConfig.bountyEmoji || '⭐'
+  const bountyStarCost = serverConfig.bountyStarCost ?? 50
+  const bountyTiers = serverConfig.bountyTiers || [{ threshold: 4, reward: 500 }, { threshold: 7, reward: 1500 }]
+
+  return new EmbedBuilder()
+    .setColor(0xFFD700) // Gold color for bounty
+    .setTitle('⭐ Bounty System')
+    .setDescription(
+      'The **bounty system** lets you support great AI interactions with **paid stars**.\n\n' +
+      'When a message accumulates enough stars, the author earns **bounty rewards**!'
+    )
+    .addFields(
+      {
+        name: '🌟 How It Works',
+        value:
+          `1. React with ${bountyEmoji} to a bot message you appreciate\n` +
+          `2. You pay **${bountyStarCost} ichor** per star (deflationary — goes to the void)\n` +
+          `3. Stars from everyone on that message accumulate\n` +
+          `4. When thresholds are reached, the author gets rewarded!`,
+      },
+      {
+        name: '🏆 Bounty Tiers',
+        value:
+          bountyTiers.map((t: any, i: number) => 
+            `**Tier ${i + 1}:** ${t.threshold} ${bountyEmoji} → **${t.reward} ichor** to author`
+          ).join('\n') + '\n\n' +
+          '_Each tier pays out once per message. Rewards are cumulative!_',
+      },
+      {
+        name: '💡 Example',
+        value:
+          `A message gets **${bountyTiers[0]?.threshold || 4} stars** from different users:\n` +
+          `• Each star cost **${bountyStarCost} ichor** (total spent: ${(bountyTiers[0]?.threshold || 4) * bountyStarCost})\n` +
+          `• Author receives **${bountyTiers[0]?.reward || 500} ichor** bounty!\n\n` +
+          (bountyTiers[1] ? 
+            `If it reaches **${bountyTiers[1].threshold} stars**, author gets another **${bountyTiers[1].reward} ichor**!` :
+            '_Only one tier is configured._'),
+      },
+      {
+        name: '📋 Rules',
+        value:
+          '• **One star per user per message** (Discord enforces this)\n' +
+          '• **Can\'t star your own messages** (no self-bounty)\n' +
+          '• **No refunds** if you remove your star\n' +
+          '• Stars are tracked for **7 days** (same as message tracking)',
+      },
+      {
+        name: '⚙️ Server Configuration',
+        value:
+          'Admins can customize the bounty system:\n' +
+          '`/soma config-bounty-emoji` — Change the star emoji\n' +
+          '`/soma config-bounty-cost` — Adjust cost per star\n' +
+          '`/soma config-bounty-tiers` — Set tier thresholds & rewards',
+      }
+    )
+    .setFooter({ text: `This server: ${bountyEmoji} costs ${bountyStarCost} ichor | Tiers: ${bountyTiers.map((t: any) => t.threshold + '⭐').join(', ')}` })
+}
+
 function createReactionsEmbed(serverConfig: any): EmbedBuilder {
+  const bountyEmoji = serverConfig.bountyEmoji || '⭐'
+
   return new EmbedBuilder()
     .setColor(Colors.ICHOR_PURPLE)
     .setTitle('😀 Emoji Reactions')
     .setDescription(
-      'Soma watches for special emoji reactions on **bot messages** to enable tipping and rewards.'
+      'Soma watches for special emoji reactions on **bot messages** to enable tipping, rewards, and bounties.'
     )
     .addFields(
+      {
+        name: `⭐ Bounty Stars (${bountyEmoji})`,
+        value:
+          `React with ${bountyEmoji} to **support a message with paid stars**.\n` +
+          `Stars accumulate → author earns bounty rewards at milestones!\n\n` +
+          `_See the **⭐ Bounty** tab for full details._`,
+      },
       {
         name: `${Emoji.TIP} Tipping (${serverConfig.tipEmoji})`,
         value:
@@ -196,7 +270,7 @@ function createReactionsEmbed(serverConfig: any): EmbedBuilder {
           `• They'll be notified via DM or their inbox`,
       },
       {
-        name: `${Emoji.REWARD} Free Rewards (${serverConfig.rewardEmoji.join(' ')})`,
+        name: `🔥 Free Rewards (${serverConfig.rewardEmoji.join(' ')})`,
         value:
           `React with any of these emoji to **give a free reward**:\n` +
           `${serverConfig.rewardEmoji.join(' ')}\n\n` +
@@ -264,6 +338,7 @@ function createEconomyEmbed(globalConfig: any): EmbedBuilder {
         value:
           'Ways to get more ichor:\n' +
           '• **Wait** for regeneration\n' +
+          '• **Earn bounties** when your messages get enough stars\n' +
           '• **Receive tips** from other users (costs them ichor)\n' +
           '• **Get rewards** when people react to your bot messages\n' +
           '• **Receive transfers** from generous users\n' +
@@ -338,7 +413,8 @@ function createSettingsEmbed(): EmbedBuilder {
           '💸 **Insufficient funds** — You tried to activate a bot without enough ichor\n' +
           '💜 **Transfer received** — Someone sent you ichor\n' +
           '🫀 **Tip received** — Someone tipped your bot message\n' +
-          '⭐ **Reward received** — Someone rewarded your bot message\n' +
+          '⭐ **Bounty earned** — Your message reached a star milestone!\n' +
+          '🔥 **Reward received** — Someone rewarded your bot message\n' +
           '🎁 **Grant received** — An admin granted you ichor',
       },
       {
@@ -351,25 +427,34 @@ function createSettingsEmbed(): EmbedBuilder {
     )
 }
 
-function createHelpNavButtons(current: string): ActionRowBuilder<ButtonBuilder> {
-  const topics = [
-    { id: 'overview', label: '📖 Overview', emoji: null },
-    { id: 'commands', label: '⚡ Commands', emoji: null },
-    { id: 'reactions', label: '😀 Emoji', emoji: null },
-    { id: 'economy', label: '💰 Economy', emoji: null },
-    { id: 'settings', label: '⚙️ Settings', emoji: null },
+function createHelpNavRows(current: string): ActionRowBuilder<ButtonBuilder>[] {
+  // Row 1: Main topics
+  const row1Topics = [
+    { id: 'overview', label: '📖 Overview' },
+    { id: 'commands', label: '⚡ Commands' },
+    { id: 'bounty', label: '⭐ Bounty' },
   ]
 
-  return new ActionRowBuilder<ButtonBuilder>()
-    .addComponents(
-      topics.map(topic =>
-        new ButtonBuilder()
-          .setCustomId(`help_${topic.id}`)
-          .setLabel(topic.label)
-          .setStyle(topic.id === current ? ButtonStyle.Primary : ButtonStyle.Secondary)
-          .setDisabled(topic.id === current)
+  // Row 2: Additional topics
+  const row2Topics = [
+    { id: 'reactions', label: '😀 Reactions' },
+    { id: 'economy', label: '💰 Economy' },
+    { id: 'settings', label: '⚙️ Settings' },
+  ]
+
+  const createRow = (topics: typeof row1Topics) => 
+    new ActionRowBuilder<ButtonBuilder>()
+      .addComponents(
+        topics.map(topic =>
+          new ButtonBuilder()
+            .setCustomId(`help_${topic.id}`)
+            .setLabel(topic.label)
+            .setStyle(topic.id === current ? ButtonStyle.Primary : ButtonStyle.Secondary)
+            .setDisabled(topic.id === current)
+        )
       )
-    )
+
+  return [createRow(row1Topics), createRow(row2Topics)]
 }
 
 /**
@@ -405,6 +490,9 @@ export async function handleHelpButton(
     case 'commands':
       embed = createCommandsEmbed()
       break
+    case 'bounty':
+      embed = createBountyEmbed(serverConfig)
+      break
     case 'reactions':
       embed = createReactionsEmbed(serverConfig)
       break
@@ -420,7 +508,7 @@ export async function handleHelpButton(
 
   await interaction.update({
     embeds: [embed],
-    components: [createHelpNavButtons(topic)],
+    components: createHelpNavRows(topic),
   })
 
   return true

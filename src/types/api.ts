@@ -171,6 +171,9 @@ export interface AdminConfigureRequest {
     rewardAmount: number
     tipEmoji: string
     tipAmount: number
+    bountyEmoji: string
+    bountyStarCost: number
+    bountyTiers: Array<{ threshold: number; reward: number }>
   }>
 }
 

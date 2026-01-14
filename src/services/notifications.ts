@@ -13,6 +13,7 @@ export type NotificationType =
   | 'transfer_received'
   | 'tip_received'
   | 'reward_received'
+  | 'bounty_earned'
   | 'grant_received'
   | 'low_balance'
   | 'system'
@@ -314,6 +315,28 @@ export function notifyTipReceived(
     'tip_received',
     `Tip from ${tipperName}`,
     `${tipperName} tipped you ${amount} ichor in #${channelName}`,
+    messageUrl ? 'View Message' : '/balance',
+    messageUrl ?? 'balance'
+  )
+}
+
+/**
+ * Create a "bounty earned" notification
+ */
+export function notifyBountyEarned(
+  db: Database,
+  userId: string,
+  amount: number,
+  starCount: number,
+  channelName: string,
+  messageUrl?: string
+): UserNotification {
+  return createNotification(
+    db,
+    userId,
+    'bounty_earned',
+    `⭐ Bounty Earned!`,
+    `Your message in #${channelName} reached ${starCount} stars! You earned ${amount} ichor.`,
     messageUrl ? 'View Message' : '/balance',
     messageUrl ?? 'balance'
   )

@@ -122,6 +122,53 @@ export const somaAdminCommand = new SlashCommandBuilder()
     sub
       .setName('config-reset')
       .setDescription('Reset server configuration to defaults'))
+  // Bounty config subcommands
+  .addSubcommand(sub =>
+    sub
+      .setName('config-bounty-emoji')
+      .setDescription('Set bounty emoji (paid star reaction)')
+      .addStringOption(opt =>
+        opt.setName('emoji')
+          .setDescription('Single emoji to use for paid bounties (default: ⭐)')
+          .setRequired(true)))
+  .addSubcommand(sub =>
+    sub
+      .setName('config-bounty-cost')
+      .setDescription('Set ichor cost per bounty star')
+      .addNumberOption(opt =>
+        opt.setName('cost')
+          .setDescription('Ichor cost per star reaction (default: 50)')
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(1000)))
+  .addSubcommand(sub =>
+    sub
+      .setName('config-bounty-tiers')
+      .setDescription('Set bounty tier thresholds and rewards')
+      .addIntegerOption(opt =>
+        opt.setName('tier1_stars')
+          .setDescription('Stars needed for tier 1 (default: 4)')
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(50))
+      .addNumberOption(opt =>
+        opt.setName('tier1_reward')
+          .setDescription('Ichor reward for tier 1 (default: 500)')
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(10000))
+      .addIntegerOption(opt =>
+        opt.setName('tier2_stars')
+          .setDescription('Stars needed for tier 2 (default: 7, 0 to disable)')
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(100))
+      .addNumberOption(opt =>
+        opt.setName('tier2_reward')
+          .setDescription('Ichor reward for tier 2 (default: 1500, ignored if tier2_stars is 0)')
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(50000)))
   // Global config subcommands (affects all servers)
   .addSubcommand(sub =>
     sub
@@ -329,6 +376,15 @@ export async function executeSomaAdmin(
       break
     case 'config-reset':
       await executeConfigReset(interaction, db)
+      break
+    case 'config-bounty-emoji':
+      await executeConfigBountyEmoji(interaction, db)
+      break
+    case 'config-bounty-cost':
+      await executeConfigBountyCost(interaction, db)
+      break
+    case 'config-bounty-tiers':
+      await executeConfigBountyTiers(interaction, db)
       break
     case 'global-view':
       await executeGlobalView(interaction, db)
@@ -872,6 +928,23 @@ async function executeConfigView(
       },
       { name: '\u200B', value: '\u200B', inline: true },
       {
+        name: '⭐ Bounty Emoji',
+        value: config.bountyEmoji || '⭐',
+        inline: true,
+      },
+      {
+        name: '⭐ Bounty Cost',
+        value: `**${config.bountyStarCost ?? 50} ichor** per star`,
+        inline: true,
+      },
+      {
+        name: '⭐ Bounty Tiers',
+        value: (config.bountyTiers || DEFAULT_SERVER_CONFIG.bountyTiers)
+          ?.map(t => `${t.threshold}⭐ → ${t.reward} ichor`)
+          .join('\n') || '_None configured_',
+        inline: true,
+      },
+      {
         name: '📊 Global Settings (from environment)',
         value: [
           `Base Regen Rate: ${formatRegenRate(globalConfig.baseRegenRate)}`,
@@ -1134,6 +1207,9 @@ async function executeConfigReset(
     rewardAmount: defaults.rewardAmount,
     tipEmoji: defaults.tipEmoji,
     tipAmount: defaults.tipAmount,
+    bountyEmoji: defaults.bountyEmoji,
+    bountyStarCost: defaults.bountyStarCost,
+    bountyTiers: defaults.bountyTiers,
   }, interaction.user.id)
 
   const embed = new EmbedBuilder()
@@ -1162,6 +1238,22 @@ async function executeConfigReset(
         value: `${DEFAULT_SERVER_CONFIG.tipAmount} ichor`,
         inline: true,
       },
+      { name: '\u200B', value: '\u200B', inline: true },
+      {
+        name: '⭐ Bounty Emoji',
+        value: DEFAULT_SERVER_CONFIG.bountyEmoji || '⭐',
+        inline: true,
+      },
+      {
+        name: '⭐ Bounty Cost',
+        value: `${DEFAULT_SERVER_CONFIG.bountyStarCost} ichor/star`,
+        inline: true,
+      },
+      {
+        name: '⭐ Bounty Tiers',
+        value: DEFAULT_SERVER_CONFIG.bountyTiers?.map(t => `${t.threshold}⭐ → ${t.reward} ichor`).join(', ') || 'None',
+        inline: true,
+      },
     )
     .setTimestamp()
 
@@ -1169,6 +1261,184 @@ async function executeConfigReset(
     resetBy: interaction.user.id,
     serverId: server.id,
   }, 'Config reset to defaults')
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+// ============================================================================
+// Bounty Config Subcommands
+// ============================================================================
+
+async function executeConfigBountyEmoji(
+  interaction: ChatInputCommandInteraction,
+  db: Database
+): Promise<void> {
+  const serverId = interaction.guildId
+  const emojiInput = interaction.options.getString('emoji', true)
+
+  if (!serverId) {
+    await interaction.reply({
+      content: `${Emoji.CROSS} This command can only be used in a server.`,
+      flags: MessageFlags.Ephemeral,
+    })
+    return
+  }
+
+  const parsedEmoji = parseEmoji(emojiInput)
+
+  if (parsedEmoji.length === 0) {
+    await interaction.reply({
+      content: `${Emoji.CROSS} No valid emoji found. Please provide a single emoji (e.g., \`⭐\` or \`:custom_emoji:\`).`,
+      flags: MessageFlags.Ephemeral,
+    })
+    return
+  }
+
+  if (parsedEmoji.length > 1) {
+    await interaction.reply({
+      content: `${Emoji.CROSS} Only one bounty emoji is allowed. You provided: ${formatEmojiList(parsedEmoji)}`,
+      flags: MessageFlags.Ephemeral,
+    })
+    return
+  }
+
+  const bountyEmoji = parsedEmoji[0]
+  const server = getOrCreateServer(db, serverId, interaction.guild?.name)
+  const previousEmoji = server.config.bountyEmoji || '⭐'
+
+  updateServerConfig(db, server.id, { bountyEmoji }, interaction.user.id)
+
+  const embed = new EmbedBuilder()
+    .setColor(Colors.SUCCESS_GREEN)
+    .setTitle(`${Emoji.CHECK} Bounty Emoji Updated`)
+    .setDescription(`Set bounty emoji to: ${bountyEmoji}`)
+    .addFields({
+      name: 'Previous',
+      value: previousEmoji,
+    })
+    .setTimestamp()
+
+  logger.info({
+    setBy: interaction.user.id,
+    serverId: server.id,
+    emoji: bountyEmoji,
+    previousEmoji,
+  }, 'Config bounty emoji updated')
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function executeConfigBountyCost(
+  interaction: ChatInputCommandInteraction,
+  db: Database
+): Promise<void> {
+  const serverId = interaction.guildId
+  const cost = interaction.options.getNumber('cost', true)
+
+  if (!serverId) {
+    await interaction.reply({
+      content: `${Emoji.CROSS} This command can only be used in a server.`,
+      flags: MessageFlags.Ephemeral,
+    })
+    return
+  }
+
+  const server = getOrCreateServer(db, serverId, interaction.guild?.name)
+  const previousCost = server.config.bountyStarCost ?? 50
+
+  updateServerConfig(db, server.id, { bountyStarCost: cost }, interaction.user.id)
+
+  const embed = new EmbedBuilder()
+    .setColor(Colors.SUCCESS_GREEN)
+    .setTitle(`${Emoji.CHECK} Bounty Cost Updated`)
+    .setDescription(`Set bounty star cost to **${cost} ichor** per star`)
+    .addFields({
+      name: 'Previous',
+      value: `${previousCost} ichor`,
+    })
+    .setTimestamp()
+
+  logger.info({
+    setBy: interaction.user.id,
+    serverId: server.id,
+    cost,
+    previousCost,
+  }, 'Config bounty cost updated')
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function executeConfigBountyTiers(
+  interaction: ChatInputCommandInteraction,
+  db: Database
+): Promise<void> {
+  const serverId = interaction.guildId
+  const tier1Stars = interaction.options.getInteger('tier1_stars', true)
+  const tier1Reward = interaction.options.getNumber('tier1_reward', true)
+  const tier2Stars = interaction.options.getInteger('tier2_stars', true)
+  const tier2Reward = interaction.options.getNumber('tier2_reward', true)
+
+  if (!serverId) {
+    await interaction.reply({
+      content: `${Emoji.CROSS} This command can only be used in a server.`,
+      flags: MessageFlags.Ephemeral,
+    })
+    return
+  }
+
+  // Build tiers array
+  const bountyTiers: Array<{ threshold: number; reward: number }> = [
+    { threshold: tier1Stars, reward: tier1Reward },
+  ]
+
+  // Only add tier 2 if stars > 0
+  if (tier2Stars > 0) {
+    if (tier2Stars <= tier1Stars) {
+      await interaction.reply({
+        content: `${Emoji.CROSS} Tier 2 stars (${tier2Stars}) must be greater than tier 1 stars (${tier1Stars}).`,
+        flags: MessageFlags.Ephemeral,
+      })
+      return
+    }
+    bountyTiers.push({ threshold: tier2Stars, reward: tier2Reward })
+  }
+
+  const server = getOrCreateServer(db, serverId, interaction.guild?.name)
+  const previousTiers = server.config.bountyTiers || DEFAULT_SERVER_CONFIG.bountyTiers
+
+  updateServerConfig(db, server.id, { bountyTiers }, interaction.user.id)
+
+  const embed = new EmbedBuilder()
+    .setColor(Colors.SUCCESS_GREEN)
+    .setTitle(`${Emoji.CHECK} Bounty Tiers Updated`)
+    .setDescription(`Set bounty tier thresholds and rewards:`)
+    .addFields(
+      {
+        name: 'New Tiers',
+        value: bountyTiers.map((t, i) => `**Tier ${i + 1}:** ${t.threshold}⭐ → ${t.reward} ichor`).join('\n'),
+      },
+      {
+        name: 'Previous Tiers',
+        value: previousTiers?.map((t, i) => `Tier ${i + 1}: ${t.threshold}⭐ → ${t.reward} ichor`).join('\n') || 'None',
+      }
+    )
+    .setTimestamp()
+
+  logger.info({
+    setBy: interaction.user.id,
+    serverId: server.id,
+    bountyTiers,
+    previousTiers,
+  }, 'Config bounty tiers updated')
 
   await interaction.reply({
     embeds: [embed],

@@ -13,19 +13,21 @@ import {
 } from 'discord.js'
 import type { Database } from 'better-sqlite3'
 import { getTrackedMessage, getTrackedMessageByTrigger } from '../../services/tracking.js'
-import { addBalance, transferBalance, getBalance } from '../../services/balance.js'
+import { addBalance, transferBalance, getBalance, deductBalanceSimple } from '../../services/balance.js'
 import { getOrCreateUser, getServerById, extractDiscordUserInfo } from '../../services/user.js'
 import { hasClaimedReward, recordRewardClaim } from '../../services/rewards.js'
+import { hasStarredMessage, recordBountyStar, getMessageBounty, getNewlyUnlockedTiers, markTiersClaimed } from '../../services/bounty.js'
 import { isDmOptedIn } from '../../services/preferences.js'
-import { notifyTipReceived } from '../../services/notifications.js'
-import { createTipReceivedEmbed } from '../embeds/builders.js'
+import { notifyTipReceived, notifyBountyEarned } from '../../services/notifications.js'
+import { createTipReceivedEmbed, createBountyEarnedEmbed } from '../embeds/builders.js'
 import { sendDM, createViewMessageButton } from '../notifications/dm.js'
 import { getGlobalConfig } from '../../services/config.js'
 import { checkTransferLimits, recordTransfer } from '../../services/transfer-limits.js'
+import { DEFAULT_BOUNTY_TIERS } from '../../types/index.js'
 import { logger } from '../../utils/logger.js'
 
 /** Default reward emoji */
-const DEFAULT_REWARD_EMOJI = ['⭐', '🔥', '💯', '👏']
+const DEFAULT_REWARD_EMOJI = ['🔥']
 
 /** Default tip emoji */
 const DEFAULT_TIP_EMOJI = '🫀'
@@ -35,6 +37,12 @@ const DEFAULT_REWARD_AMOUNT = 1
 
 /** Default tip amount */
 const DEFAULT_TIP_AMOUNT = 5
+
+/** Default bounty emoji */
+const DEFAULT_BOUNTY_EMOJI = '⭐'
+
+/** Default bounty star cost */
+const DEFAULT_BOUNTY_STAR_COST = 50
 
 /** Database reference for reward tracking */
 let rewardDb: Database | null = null
@@ -224,16 +232,41 @@ export async function handleReactionAdd(
     rewardAmount: DEFAULT_REWARD_AMOUNT,
     tipEmoji: DEFAULT_TIP_EMOJI,
     tipAmount: DEFAULT_TIP_AMOUNT,
+    bountyEmoji: DEFAULT_BOUNTY_EMOJI,
+    bountyStarCost: DEFAULT_BOUNTY_STAR_COST,
+    bountyTiers: DEFAULT_BOUNTY_TIERS,
   }
+
+  // Get bounty config with defaults
+  const bountyEmoji = serverConfig.bountyEmoji || DEFAULT_BOUNTY_EMOJI
+  const bountyStarCost = serverConfig.bountyStarCost ?? DEFAULT_BOUNTY_STAR_COST
+  const bountyTiers = serverConfig.bountyTiers || DEFAULT_BOUNTY_TIERS
 
   logger.debug({
     messageId,
     emoji,
     reactorId: user.id,
     triggerUserId: tracked.triggerUserDiscordId,
+    isBounty: emoji === bountyEmoji,
     isTip: emoji === serverConfig.tipEmoji,
     isReward: serverConfig.rewardEmoji.includes(emoji),
   }, 'Processing reaction on tracked message')
+
+  // Check for bounty star (paid reaction)
+  if (emoji === bountyEmoji) {
+    await processBounty(
+      db,
+      client,
+      user as User,
+      tracked.triggerUserId,
+      tracked.triggerUserDiscordId,
+      tracked.serverId,
+      bountyStarCost,
+      bountyTiers,
+      reaction.message
+    )
+    return
+  }
 
   // Check for tip
   if (emoji === serverConfig.tipEmoji) {
@@ -387,6 +420,163 @@ async function processTip(
       tipperId: tipper.id,
       recipientId: recipientDiscordId,
     }, 'Failed to process tip')
+  }
+}
+
+async function processBounty(
+  db: Database,
+  client: Client,
+  reactor: User,
+  recipientUserId: string,
+  recipientDiscordId: string,
+  serverId: string | null,
+  starCost: number,
+  tiers: { threshold: number; reward: number }[],
+  message: any
+): Promise<void> {
+  // Get reactor's internal user ID and cache their profile
+  const reactorUser = getOrCreateUser(db, reactor.id, extractDiscordUserInfo(reactor))
+  const messageId = message.id
+
+  // Check if user has already starred this message
+  if (hasStarredMessage(db, reactorUser.id, messageId)) {
+    logger.debug({
+      reactorId: reactor.id,
+      messageId,
+    }, 'User has already starred this message')
+    return
+  }
+
+  // Check reactor has enough balance for the star cost
+  const reactorBalance = getBalance(db, reactorUser.id)
+  if (reactorBalance.balance < starCost) {
+    logger.debug({
+      reactorId: reactor.id,
+      required: starCost,
+      available: reactorBalance.balance,
+    }, 'Reactor has insufficient balance for bounty star')
+    return
+  }
+
+  try {
+    // Deduct star cost from reactor (goes to void - deflationary)
+    deductBalanceSimple(db, reactorUser.id, starCost, serverId, 'bounty_star', {
+      messageId,
+      recipientUserId,
+    })
+
+    // Record the star and get new count
+    const newStarCount = recordBountyStar(db, reactorUser.id, messageId, starCost)
+
+    logger.info({
+      reactorId: reactor.id,
+      recipientUserId,
+      messageId,
+      starCost,
+      newStarCount,
+    }, 'Bounty star recorded')
+
+    // Check if any tier thresholds are crossed
+    const currentBounty = getMessageBounty(db, messageId)
+    if (!currentBounty) return
+
+    const newlyUnlocked = getNewlyUnlockedTiers(
+      newStarCount,
+      currentBounty.tiersClaimed,
+      tiers
+    )
+
+    if (newlyUnlocked.length === 0) {
+      logger.debug({
+        messageId,
+        starCount: newStarCount,
+        tiersClaimed: currentBounty.tiersClaimed,
+      }, 'No new tiers unlocked')
+      return
+    }
+
+    // Calculate total reward from newly unlocked tiers
+    let totalReward = 0
+    for (const tierIndex of newlyUnlocked) {
+      totalReward += tiers[tierIndex].reward
+    }
+
+    // Mark tiers as claimed
+    markTiersClaimed(db, messageId, newlyUnlocked)
+
+    // Add bounty reward to recipient
+    const result = addBalance(
+      db,
+      recipientUserId,
+      totalReward,
+      serverId,
+      'reward',
+      {
+        type: 'bounty',
+        messageId,
+        starCount: newStarCount,
+        tiersUnlocked: newlyUnlocked,
+        tierRewards: newlyUnlocked.map(i => tiers[i]),
+      }
+    )
+
+    logger.info({
+      recipientUserId,
+      messageId,
+      totalReward,
+      newBalance: result.balanceAfter,
+      starCount: newStarCount,
+      tiersUnlocked: newlyUnlocked,
+    }, 'Bounty tier reward(s) paid out')
+
+    // Notify recipient about the bounty
+    const recipient = await client.users.fetch(recipientDiscordId)
+    const channel = message.channel
+    const messageUrl = `https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`
+    const channelName = channel.name || 'channel'
+
+    // Check if recipient has opted into DMs
+    const dmOptedIn = isDmOptedIn(db, recipientUserId)
+    let dmSent = false
+
+    if (dmOptedIn) {
+      const embed = createBountyEarnedEmbed(
+        totalReward,
+        newStarCount,
+        channelName,
+        result.balanceAfter,
+        messageUrl
+      )
+
+      const viewMessageButton = message.guildId && message.channelId && message.id
+        ? createViewMessageButton(message.guildId, message.channelId, message.id)
+        : undefined
+
+      dmSent = await sendDM(recipient, {
+        embeds: [embed],
+        components: viewMessageButton ? [viewMessageButton] : [],
+      })
+    }
+
+    // If DMs not enabled or failed, store notification in inbox
+    if (!dmSent) {
+      notifyBountyEarned(
+        db,
+        recipientUserId,
+        totalReward,
+        newStarCount,
+        channelName,
+        messageUrl
+      )
+    }
+
+  } catch (error: any) {
+    logger.error({
+      error,
+      reactorId: reactor.id,
+      recipientUserId,
+      messageId,
+    }, 'Failed to process bounty star')
   }
 }
 

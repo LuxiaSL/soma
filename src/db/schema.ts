@@ -151,6 +151,23 @@ CREATE TABLE IF NOT EXISTS user_daily_transfers (
   PRIMARY KEY (discord_id, target_type)
 );
 
+-- Bounty system: tracks star counts and tier payouts per message
+CREATE TABLE IF NOT EXISTS message_bounties (
+  message_id TEXT PRIMARY KEY,
+  star_count INTEGER NOT NULL DEFAULT 0,
+  tiers_claimed TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Bounty system: tracks individual star contributions (who starred what)
+CREATE TABLE IF NOT EXISTS bounty_stars (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  message_id TEXT NOT NULL,
+  cost_paid REAL NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, message_id)
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_transactions_from_user ON transactions(from_user_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_transactions_to_user ON transactions(to_user_id, timestamp);
@@ -161,4 +178,5 @@ CREATE INDEX IF NOT EXISTS idx_role_configs_server ON role_configs(server_id);
 CREATE INDEX IF NOT EXISTS idx_tracked_messages_expires ON tracked_messages(expires_at);
 -- Note: idx_tracked_messages_trigger is created by migration 009
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON user_notifications(user_id, read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bounty_stars_message ON bounty_stars(message_id);
 `
