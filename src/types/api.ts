@@ -209,11 +209,12 @@ export interface ErrorResponse {
 // ============================================================================
 
 export interface TrackMessageRequest {
-  messageId: string      // Discord message ID (bot's response)
-  channelId: string      // Discord channel ID
-  serverId: string       // Discord guild ID
-  botId: string          // Bot's Discord ID
-  triggerUserId: string  // Discord user ID who triggered the bot
+  messageId: string         // Discord message ID (bot's response)
+  channelId: string         // Discord channel ID
+  serverId: string          // Discord guild ID
+  botId: string             // Bot's Discord ID
+  triggerUserId: string     // Discord user ID who triggered the bot
+  triggerMessageId?: string // Discord message ID of user's triggering message (optional)
 }
 
 export interface TrackMessageResponse {
@@ -232,6 +233,7 @@ export interface GetTrackedMessageResponse {
   botDiscordId: string
   triggerUserId: string
   triggerUserDiscordId: string
+  triggerMessageId: string | null
   createdAt: string
   expiresAt: string
 }

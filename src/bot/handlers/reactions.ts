@@ -12,7 +12,7 @@ import {
   type Client,
 } from 'discord.js'
 import type { Database } from 'better-sqlite3'
-import { getTrackedMessage } from '../../services/tracking.js'
+import { getTrackedMessage, getTrackedMessageByTrigger } from '../../services/tracking.js'
 import { addBalance, transferBalance, getBalance } from '../../services/balance.js'
 import { getOrCreateUser, getServerByDiscordId, extractDiscordUserInfo } from '../../services/user.js'
 import { hasClaimedReward, recordRewardClaim } from '../../services/rewards.js'
@@ -200,8 +200,15 @@ export async function handleReactionAdd(
 
   if (!emoji) return
 
-  // Check if this is a tracked bot message
-  const tracked = getTrackedMessage(db, messageId)
+  // Check if this is a tracked bot message OR a trigger message
+  // First try looking up by bot response message ID
+  let tracked = getTrackedMessage(db, messageId)
+  
+  // If not found, check if this is the trigger message that caused a bot response
+  if (!tracked) {
+    tracked = getTrackedMessageByTrigger(db, messageId)
+  }
+  
   if (!tracked) return
 
   // Can't reward yourself
@@ -252,7 +259,7 @@ export async function handleReactionAdd(
       tracked.serverId,
       serverConfig.rewardAmount,
       emoji,
-      messageId
+      tracked.messageId  // Always use canonical bot response ID for claim tracking
     )
   }
 }

@@ -66,12 +66,14 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 -- Tracked messages (for reaction rewards/tips)
 -- Messages are tracked for 7 days after bot response
+-- Reactions on either the bot response (message_id) OR the trigger message (trigger_message_id) reward the user
 CREATE TABLE IF NOT EXISTS tracked_messages (
   message_id TEXT PRIMARY KEY,
   channel_id TEXT NOT NULL,
   server_id TEXT REFERENCES servers(id),
   bot_discord_id TEXT NOT NULL,
   trigger_user_id TEXT NOT NULL REFERENCES users(id),
+  trigger_message_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   expires_at TEXT NOT NULL
 );
@@ -157,5 +159,6 @@ CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type, timestamp
 CREATE INDEX IF NOT EXISTS idx_bot_costs_bot ON bot_costs(bot_discord_id);
 CREATE INDEX IF NOT EXISTS idx_role_configs_server ON role_configs(server_id);
 CREATE INDEX IF NOT EXISTS idx_tracked_messages_expires ON tracked_messages(expires_at);
+CREATE INDEX IF NOT EXISTS idx_tracked_messages_trigger ON tracked_messages(trigger_message_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON user_notifications(user_id, read, created_at DESC);
 `

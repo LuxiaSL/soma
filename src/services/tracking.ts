@@ -13,6 +13,7 @@ const TRACKING_DURATION_DAYS = 7
 
 /**
  * Track a bot response message for reactions
+ * @param triggerMessageId - Optional: the user's message that triggered the bot (for rewarding reactions on it)
  */
 export function trackMessage(
   db: Database,
@@ -20,7 +21,8 @@ export function trackMessage(
   channelId: string,
   serverDiscordId: string,
   botDiscordId: string,
-  triggerUserDiscordId: string
+  triggerUserDiscordId: string,
+  triggerMessageId?: string
 ): TrackedMessage {
   // Ensure user and server exist
   const user = getOrCreateUser(db, triggerUserDiscordId)
@@ -33,14 +35,15 @@ export function trackMessage(
   // Insert or replace (in case of duplicate)
   db.prepare(`
     INSERT OR REPLACE INTO tracked_messages
-      (message_id, channel_id, server_id, bot_discord_id, trigger_user_id, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
+      (message_id, channel_id, server_id, bot_discord_id, trigger_user_id, trigger_message_id, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
   `).run(
     messageId,
     channelId,
     server.id,
     botDiscordId,
     user.id,
+    triggerMessageId || null,
     expiresAt.toISOString()
   )
 
@@ -50,6 +53,7 @@ export function trackMessage(
     serverId: server.id,
     botDiscordId,
     triggerUserId: user.id,
+    triggerMessageId: triggerMessageId || null,
     expiresAt: expiresAt.toISOString(),
   }, 'Tracked message for reactions')
 
@@ -59,13 +63,14 @@ export function trackMessage(
     serverId: server.id,
     botDiscordId,
     triggerUserId: user.id,
+    triggerMessageId: triggerMessageId || null,
     createdAt: now,
     expiresAt,
   }
 }
 
 /**
- * Get a tracked message by message ID
+ * Get a tracked message by message ID (bot's response message)
  * Returns null if not found or expired
  */
 export function getTrackedMessage(
@@ -79,6 +84,7 @@ export function getTrackedMessage(
       tm.server_id,
       tm.bot_discord_id,
       tm.trigger_user_id,
+      tm.trigger_message_id,
       tm.created_at,
       tm.expires_at,
       u.discord_id as trigger_user_discord_id
@@ -98,6 +104,49 @@ export function getTrackedMessage(
     serverId: row.server_id,
     botDiscordId: row.bot_discord_id,
     triggerUserId: row.trigger_user_id,
+    triggerMessageId: row.trigger_message_id,
+    triggerUserDiscordId: row.trigger_user_discord_id,
+    createdAt: new Date(row.created_at),
+    expiresAt: new Date(row.expires_at),
+  }
+}
+
+/**
+ * Get a tracked message by trigger message ID (user's original message that triggered the bot)
+ * Returns null if not found or expired
+ */
+export function getTrackedMessageByTrigger(
+  db: Database,
+  triggerMessageId: string
+): (TrackedMessage & { triggerUserDiscordId: string }) | null {
+  const row = db.prepare(`
+    SELECT 
+      tm.message_id,
+      tm.channel_id,
+      tm.server_id,
+      tm.bot_discord_id,
+      tm.trigger_user_id,
+      tm.trigger_message_id,
+      tm.created_at,
+      tm.expires_at,
+      u.discord_id as trigger_user_discord_id
+    FROM tracked_messages tm
+    JOIN users u ON tm.trigger_user_id = u.id
+    WHERE tm.trigger_message_id = ?
+    AND datetime(tm.expires_at) > datetime('now')
+  `).get(triggerMessageId) as (TrackedMessageRow & { trigger_user_discord_id: string }) | undefined
+
+  if (!row) {
+    return null
+  }
+
+  return {
+    messageId: row.message_id,
+    channelId: row.channel_id,
+    serverId: row.server_id,
+    botDiscordId: row.bot_discord_id,
+    triggerUserId: row.trigger_user_id,
+    triggerMessageId: row.trigger_message_id,
     triggerUserDiscordId: row.trigger_user_discord_id,
     createdAt: new Date(row.created_at),
     expiresAt: new Date(row.expires_at),

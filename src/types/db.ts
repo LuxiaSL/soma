@@ -78,11 +78,12 @@ export interface TransactionRow {
  * Tracked message record (for reaction rewards/tips)
  */
 export interface TrackedMessageRow {
-  message_id: string      // Discord message ID (primary key)
+  message_id: string      // Discord message ID (primary key) - bot's response
   channel_id: string      // Discord channel ID
   server_id: string | null // References servers.id
   bot_discord_id: string  // Bot's Discord ID
   trigger_user_id: string // References users.id
+  trigger_message_id: string | null // Discord message ID of user's triggering message
   created_at: string      // ISO timestamp
   expires_at: string      // ISO timestamp
 }
@@ -150,6 +151,7 @@ export interface TrackedMessage {
   serverId: string | null
   botDiscordId: string
   triggerUserId: string
+  triggerMessageId: string | null
   createdAt: Date
   expiresAt: Date
 }

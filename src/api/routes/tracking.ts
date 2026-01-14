@@ -16,6 +16,7 @@ const TrackMessageSchema = z.object({
   serverId: z.string().min(1),
   botId: z.string().min(1),
   triggerUserId: z.string().min(1),
+  triggerMessageId: z.string().min(1).optional(),
 })
 
 export function createTrackingRouter(db: Database): Router {
@@ -45,7 +46,8 @@ export function createTrackingRouter(db: Database): Router {
         body.channelId,
         body.serverId,
         body.botId,
-        body.triggerUserId
+        body.triggerUserId,
+        body.triggerMessageId
       )
 
       const response: TrackMessageResponse = {
@@ -84,6 +86,7 @@ export function createTrackingRouter(db: Database): Router {
         botDiscordId: tracked.botDiscordId,
         triggerUserId: tracked.triggerUserId,
         triggerUserDiscordId: tracked.triggerUserDiscordId,
+        triggerMessageId: tracked.triggerMessageId,
         createdAt: tracked.createdAt.toISOString(),
         expiresAt: tracked.expiresAt.toISOString(),
       }

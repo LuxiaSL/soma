@@ -193,6 +193,21 @@ const MIGRATIONS: Migration[] = [
       `)
     }
   },
+  {
+    id: '009_add_trigger_message_tracking',
+    description: 'Add trigger_message_id to tracked_messages for rewarding reactions on the triggering message',
+    up: (db) => {
+      const tableInfo = db.prepare(`PRAGMA table_info(tracked_messages)`).all() as Array<{ name: string }>
+      const existingColumns = new Set(tableInfo.map(c => c.name))
+
+      // Add trigger_message_id column (nullable - existing records won't have it)
+      if (!existingColumns.has('trigger_message_id')) {
+        db.exec(`ALTER TABLE tracked_messages ADD COLUMN trigger_message_id TEXT`)
+        // Create index for looking up by trigger message
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_tracked_messages_trigger ON tracked_messages(trigger_message_id)`)
+      }
+    }
+  },
 ]
 
 /**
