@@ -245,7 +245,10 @@ export function createAdminRouter(db: Database): Router {
         // Runtime settings
         rewardCooldownMinutes, 
         maxDailyRewards, 
-        globalCostMultiplier, 
+        globalCostMultiplier,
+        // Transfer limits
+        maxDailySent,
+        maxDailyReceived,
         modifiedBy 
       } = req.body
 
@@ -287,6 +290,19 @@ export function createAdminRouter(db: Database): Router {
         }
       }
 
+      // Validate transfer limits
+      if (maxDailySent !== undefined) {
+        if (typeof maxDailySent !== 'number' || maxDailySent < 0 || maxDailySent > 100000) {
+          throw new ValidationError('maxDailySent must be between 0 and 100000', 'maxDailySent')
+        }
+      }
+
+      if (maxDailyReceived !== undefined) {
+        if (typeof maxDailyReceived !== 'number' || maxDailyReceived < 0 || maxDailyReceived > 100000) {
+          throw new ValidationError('maxDailyReceived must be between 0 and 100000', 'maxDailyReceived')
+        }
+      }
+
       const updates: Partial<{
         baseRegenRate: number
         maxBalance: number
@@ -294,6 +310,8 @@ export function createAdminRouter(db: Database): Router {
         rewardCooldownMinutes: number
         maxDailyRewards: number
         globalCostMultiplier: number
+        maxDailySent: number
+        maxDailyReceived: number
       }> = {}
       
       if (baseRegenRate !== undefined) updates.baseRegenRate = baseRegenRate
@@ -302,6 +320,8 @@ export function createAdminRouter(db: Database): Router {
       if (rewardCooldownMinutes !== undefined) updates.rewardCooldownMinutes = rewardCooldownMinutes
       if (maxDailyRewards !== undefined) updates.maxDailyRewards = maxDailyRewards
       if (globalCostMultiplier !== undefined) updates.globalCostMultiplier = globalCostMultiplier
+      if (maxDailySent !== undefined) updates.maxDailySent = maxDailySent
+      if (maxDailyReceived !== undefined) updates.maxDailyReceived = maxDailyReceived
 
       if (Object.keys(updates).length === 0) {
         throw new ValidationError('No valid fields to update', 'body')

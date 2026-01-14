@@ -51,6 +51,8 @@ export interface GlobalConfig {
   rewardCooldownMinutes: number  // Cooldown between free rewards in minutes (default: 5)
   maxDailyRewards: number        // Max free rewards per user per day (default: 3)
   globalCostMultiplier: number   // Multiplier applied to all bot costs (default: 1.0)
+  maxDailySent: number           // Max ichor a user can send per day via transfers/tips (default: 1000)
+  maxDailyReceived: number       // Max ichor a user can receive per day via transfers/tips (default: 2000)
 }
 
 /**
@@ -72,6 +74,8 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   rewardCooldownMinutes: 5,
   maxDailyRewards: 3,
   globalCostMultiplier: 1.0,
+  maxDailySent: 1000,
+  maxDailyReceived: 2000,
 }
 
 /**

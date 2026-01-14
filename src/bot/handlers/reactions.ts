@@ -21,6 +21,7 @@ import { notifyTipReceived } from '../../services/notifications.js'
 import { createTipReceivedEmbed } from '../embeds/builders.js'
 import { sendDM, createViewMessageButton } from '../notifications/dm.js'
 import { getGlobalConfig } from '../../services/config.js'
+import { checkTransferLimits, recordTransfer } from '../../services/transfer-limits.js'
 import { logger } from '../../utils/logger.js'
 
 /** Default reward emoji */
@@ -280,6 +281,20 @@ async function processTip(
     return
   }
 
+  // Check daily transfer limits (tips count as transfers)
+  const limitCheck = checkTransferLimits(db, tipper.id, recipientDiscordId, tipAmount)
+  if (!limitCheck.allowed) {
+    logger.debug({
+      tipperId: tipper.id,
+      recipientId: recipientDiscordId,
+      amount: tipAmount,
+      reason: limitCheck.reason,
+      senderRemaining: limitCheck.senderRemaining,
+      receiverRemaining: limitCheck.receiverRemaining,
+    }, 'Tip blocked by daily transfer limit')
+    return
+  }
+
   try {
     // Transfer ichor from tipper to recipient
     const result = transferBalance(
@@ -290,6 +305,9 @@ async function processTip(
       serverId || '',
       `Tip for message ${message.id}`
     )
+
+    // Record the tip against daily transfer limits
+    recordTransfer(db, tipper.id, recipientDiscordId, tipAmount)
 
     // Get recipient Discord user
     const recipient = await client.users.fetch(recipientDiscordId)

@@ -143,7 +143,8 @@ function createCommandsEmbed(): EmbedBuilder {
         name: '💸 Transactions',
         value:
           '`/transfer @user amount` — Send ichor to another user\n' +
-          '_You can also tip users by reacting to their bot messages!_',
+          '_You can also tip users by reacting to their bot messages!_\n' +
+          '_Note: Daily limits apply to both transfers and tips._',
       },
       {
         name: '⚙️ Settings & Notifications',
@@ -172,7 +173,8 @@ function createCommandsEmbed(): EmbedBuilder {
           '**Global Config:**\n' +
           '`global-view` — View global settings\n' +
           '`global-cost-multiplier` — Adjust all bot costs\n' +
-          '`global-reward-cooldown` / `global-max-daily-rewards`',
+          '`global-reward-cooldown` / `global-max-daily-rewards`\n' +
+          '`global-max-daily-sent` / `global-max-daily-received`',
       }
     )
 }

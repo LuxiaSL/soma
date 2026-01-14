@@ -102,6 +102,12 @@ function loadConfig(): GlobalConfig {
     if (columns.has('global_cost_multiplier')) {
       selectCols.push('global_cost_multiplier')
     }
+    if (columns.has('max_daily_sent')) {
+      selectCols.push('max_daily_sent')
+    }
+    if (columns.has('max_daily_received')) {
+      selectCols.push('max_daily_received')
+    }
 
     if (selectCols.length === 0) {
       throw new Error('global_config table has no recognized columns')
@@ -117,6 +123,8 @@ function loadConfig(): GlobalConfig {
       reward_cooldown_minutes?: number
       max_daily_rewards?: number
       global_cost_multiplier?: number
+      max_daily_sent?: number
+      max_daily_received?: number
     } | undefined
 
     // Build config with priority: DB value > ENV fallback > hardcoded default
@@ -131,6 +139,8 @@ function loadConfig(): GlobalConfig {
       rewardCooldownMinutes: row?.reward_cooldown_minutes ?? DEFAULT_GLOBAL_CONFIG.rewardCooldownMinutes,
       maxDailyRewards: row?.max_daily_rewards ?? DEFAULT_GLOBAL_CONFIG.maxDailyRewards,
       globalCostMultiplier: row?.global_cost_multiplier ?? DEFAULT_GLOBAL_CONFIG.globalCostMultiplier,
+      maxDailySent: row?.max_daily_sent ?? DEFAULT_GLOBAL_CONFIG.maxDailySent,
+      maxDailyReceived: row?.max_daily_received ?? DEFAULT_GLOBAL_CONFIG.maxDailyReceived,
     }
   } catch (error) {
     logger.warn({ error }, 'Failed to load config from database, using defaults')
@@ -193,6 +203,16 @@ export function updateGlobalConfig(
   if (updates.globalCostMultiplier !== undefined) {
     fields.push('global_cost_multiplier = ?')
     values.push(updates.globalCostMultiplier)
+  }
+
+  if (updates.maxDailySent !== undefined) {
+    fields.push('max_daily_sent = ?')
+    values.push(updates.maxDailySent)
+  }
+
+  if (updates.maxDailyReceived !== undefined) {
+    fields.push('max_daily_received = ?')
+    values.push(updates.maxDailyReceived)
   }
 
   if (fields.length === 0) {

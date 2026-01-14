@@ -157,6 +157,26 @@ export const somaAdminCommand = new SlashCommandBuilder()
           .setRequired(true)
           .setMinValue(0.1)
           .setMaxValue(10)))
+  .addSubcommand(sub =>
+    sub
+      .setName('global-max-daily-sent')
+      .setDescription('Set max ichor a user can send per day via transfers/tips')
+      .addNumberOption(opt =>
+        opt.setName('amount')
+          .setDescription('Max ichor per day (default: 1000)')
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(100000)))
+  .addSubcommand(sub =>
+    sub
+      .setName('global-max-daily-received')
+      .setDescription('Set max ichor a user can receive per day via transfers/tips')
+      .addNumberOption(opt =>
+        opt.setName('amount')
+          .setDescription('Max ichor per day (default: 2000)')
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(100000)))
 
 /**
  * Check if user has admin access
@@ -307,6 +327,12 @@ export async function executeSomaAdmin(
       break
     case 'global-cost-multiplier':
       await executeGlobalCostMultiplier(interaction, db)
+      break
+    case 'global-max-daily-sent':
+      await executeGlobalMaxDailySent(interaction, db)
+      break
+    case 'global-max-daily-received':
+      await executeGlobalMaxDailyReceived(interaction, db)
       break
     default:
       await interaction.reply({
@@ -1155,6 +1181,10 @@ async function executeGlobalView(
     ? 'Unlimited'
     : `${config.maxDailyRewards}/day`
 
+  // Format transfer limits
+  const maxSentStr = config.maxDailySent === 0 ? 'Unlimited' : `${config.maxDailySent} ichor`
+  const maxReceivedStr = config.maxDailyReceived === 0 ? 'Unlimited' : `${config.maxDailyReceived} ichor`
+
   const embed = new EmbedBuilder()
     .setColor(Colors.ICHOR_PURPLE)
     .setTitle('🌐 Global Configuration')
@@ -1181,6 +1211,14 @@ async function executeGlobalView(
         value: config.globalCostMultiplier === 1.0 
           ? '**1.0x** (normal pricing)' 
           : `**${config.globalCostMultiplier}x** (${config.globalCostMultiplier < 1 ? 'discount' : 'surcharge'})`,
+        inline: true,
+      },
+      {
+        name: '📤 Transfer Limits (per day)',
+        value: [
+          `Max Send: **${maxSentStr}**`,
+          `Max Receive: **${maxReceivedStr}**`,
+        ].join('\n'),
         inline: true,
       }
     )
@@ -1359,6 +1397,108 @@ async function executeGlobalCostMultiplier(
     globalCostMultiplier: multiplier,
     previousValue,
   }, 'Global cost multiplier updated')
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function executeGlobalMaxDailySent(
+  interaction: ChatInputCommandInteraction,
+  db: Database
+): Promise<void> {
+  const amount = interaction.options.getNumber('amount', true)
+  const previousConfig = getGlobalConfig()
+  const previousValue = previousConfig.maxDailySent
+
+  updateGlobalConfig(db, {
+    maxDailySent: amount,
+  }, interaction.user.id)
+
+  const embed = new EmbedBuilder()
+    .setColor(Colors.SUCCESS_GREEN)
+    .setTitle(`${Emoji.CHECK} Max Daily Sent Updated`)
+    .setDescription(
+      amount === 0 
+        ? '⚠️ Daily send limit disabled! Users can send unlimited ichor per day.'
+        : `Set max daily send limit to **${amount} ichor** per user per day.`
+    )
+    .addFields(
+      {
+        name: 'Previous Value',
+        value: previousValue === 0 ? 'Unlimited' : `${previousValue} ichor`,
+        inline: true,
+      },
+      {
+        name: 'New Value',
+        value: amount === 0 ? 'Unlimited' : `${amount} ichor`,
+        inline: true,
+      },
+      {
+        name: '💡 Info',
+        value: 'This limit applies to both `/transfer` commands and 🫀 tip reactions. Limits reset at midnight UTC.',
+      }
+    )
+    .setFooter({ text: 'This affects all servers globally' })
+    .setTimestamp()
+
+  logger.info({
+    setBy: interaction.user.id,
+    maxDailySent: amount,
+    previousValue,
+  }, 'Global max daily sent updated')
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function executeGlobalMaxDailyReceived(
+  interaction: ChatInputCommandInteraction,
+  db: Database
+): Promise<void> {
+  const amount = interaction.options.getNumber('amount', true)
+  const previousConfig = getGlobalConfig()
+  const previousValue = previousConfig.maxDailyReceived
+
+  updateGlobalConfig(db, {
+    maxDailyReceived: amount,
+  }, interaction.user.id)
+
+  const embed = new EmbedBuilder()
+    .setColor(Colors.SUCCESS_GREEN)
+    .setTitle(`${Emoji.CHECK} Max Daily Received Updated`)
+    .setDescription(
+      amount === 0 
+        ? '⚠️ Daily receive limit disabled! Users can receive unlimited ichor per day.'
+        : `Set max daily receive limit to **${amount} ichor** per user per day.`
+    )
+    .addFields(
+      {
+        name: 'Previous Value',
+        value: previousValue === 0 ? 'Unlimited' : `${previousValue} ichor`,
+        inline: true,
+      },
+      {
+        name: 'New Value',
+        value: amount === 0 ? 'Unlimited' : `${amount} ichor`,
+        inline: true,
+      },
+      {
+        name: '💡 Info',
+        value: 'This limit applies to both `/transfer` commands and 🫀 tip reactions. Limits reset at midnight UTC.',
+      }
+    )
+    .setFooter({ text: 'This affects all servers globally' })
+    .setTimestamp()
+
+  logger.info({
+    setBy: interaction.user.id,
+    maxDailyReceived: amount,
+    previousValue,
+  }, 'Global max daily received updated')
 
   await interaction.reply({
     embeds: [embed],

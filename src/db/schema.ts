@@ -139,6 +139,16 @@ CREATE TABLE IF NOT EXISTS user_daily_rewards (
   reset_date TEXT NOT NULL DEFAULT (date('now'))
 );
 
+-- Daily transfer tracking per user
+-- Tracks how much ichor a user has sent/received via transfers and tips per day
+CREATE TABLE IF NOT EXISTS user_daily_transfers (
+  discord_id TEXT NOT NULL,
+  target_type TEXT NOT NULL CHECK (target_type IN ('sent', 'received')),
+  amount_today REAL NOT NULL DEFAULT 0,
+  reset_date TEXT NOT NULL DEFAULT (date('now')),
+  PRIMARY KEY (discord_id, target_type)
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_transactions_from_user ON transactions(from_user_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_transactions_to_user ON transactions(to_user_id, timestamp);

@@ -12,6 +12,7 @@ import {
 } from 'discord.js'
 import type { Database } from 'better-sqlite3'
 import { getBalance, transferBalance, getEffectiveRegenRateWithRole } from '../../services/balance.js'
+import { checkTransferLimits, recordTransfer, getDailyTransferStatus } from '../../services/transfer-limits.js'
 import { getAllBotCosts, getUserKnownServersCosts } from '../../services/cost.js'
 import { getOrCreateUser, getOrCreateServer, extractDiscordUserInfo } from '../../services/user.js'
 import { updateUserServerRoles } from '../../services/roles.js'
@@ -311,6 +312,27 @@ async function handleTransferConfirm(
     return
   }
 
+  // Check daily transfer limits
+  const limitCheck = checkTransferLimits(db, interaction.user.id, recipientId, amount)
+  if (!limitCheck.allowed) {
+    if (limitCheck.reason === 'sender_limit') {
+      const status = getDailyTransferStatus(db, interaction.user.id)
+      await interaction.update({
+        content: `${Emoji.CROSS} **Daily send limit reached.**\nYou can send up to **${status.maxDailySent} ichor** per day.\nYou've sent **${status.sentToday.toFixed(1)}** today (**${status.sentRemaining.toFixed(1)}** remaining).`,
+        embeds: [],
+        components: [],
+      })
+    } else {
+      const status = getDailyTransferStatus(db, recipientId)
+      await interaction.update({
+        content: `${Emoji.CROSS} **Recipient's daily receive limit reached.**\nUsers can receive up to **${status.maxDailyReceived} ichor** per day.\nThey've received **${status.receivedToday.toFixed(1)}** today (**${status.receivedRemaining.toFixed(1)}** remaining).`,
+        embeds: [],
+        components: [],
+      })
+    }
+    return
+  }
+
   // Get internal server ID for transaction logging
   const server = getOrCreateServer(db, guildId)
 
@@ -333,6 +355,9 @@ async function handleTransferConfirm(
       amount,
       result.fromBalanceAfter
     )
+
+    // Record the transfer against daily limits
+    recordTransfer(db, interaction.user.id, recipientId, amount)
 
     await interaction.update({
       embeds: [successEmbed],

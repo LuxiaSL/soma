@@ -163,6 +163,36 @@ const MIGRATIONS: Migration[] = [
       }
     }
   },
+  {
+    id: '008_add_transfer_limits',
+    description: 'Add daily transfer limits (sent/received) to global_config and tracking table',
+    up: (db) => {
+      // Add columns to global_config
+      const tableInfo = db.prepare(`PRAGMA table_info(global_config)`).all() as Array<{ name: string }>
+      const existingColumns = new Set(tableInfo.map(c => c.name))
+
+      // Add max_daily_sent (max ichor a user can send per day, default 1000)
+      if (!existingColumns.has('max_daily_sent')) {
+        db.exec(`ALTER TABLE global_config ADD COLUMN max_daily_sent REAL NOT NULL DEFAULT 1000.0`)
+      }
+
+      // Add max_daily_received (max ichor a user can receive per day, default 2000)
+      if (!existingColumns.has('max_daily_received')) {
+        db.exec(`ALTER TABLE global_config ADD COLUMN max_daily_received REAL NOT NULL DEFAULT 2000.0`)
+      }
+
+      // Create tracking table for daily transfers
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_daily_transfers (
+          discord_id TEXT NOT NULL,
+          target_type TEXT NOT NULL CHECK (target_type IN ('sent', 'received')),
+          amount_today REAL NOT NULL DEFAULT 0,
+          reset_date TEXT NOT NULL DEFAULT (date('now')),
+          PRIMARY KEY (discord_id, target_type)
+        )
+      `)
+    }
+  },
 ]
 
 /**
