@@ -14,7 +14,7 @@ import {
 import type { Database } from 'better-sqlite3'
 import { getTrackedMessage, getTrackedMessageByTrigger } from '../../services/tracking.js'
 import { addBalance, transferBalance, getBalance } from '../../services/balance.js'
-import { getOrCreateUser, getServerByDiscordId, extractDiscordUserInfo } from '../../services/user.js'
+import { getOrCreateUser, getServerById, extractDiscordUserInfo } from '../../services/user.js'
 import { hasClaimedReward, recordRewardClaim } from '../../services/rewards.js'
 import { isDmOptedIn } from '../../services/preferences.js'
 import { notifyTipReceived } from '../../services/notifications.js'
@@ -214,9 +214,9 @@ export async function handleReactionAdd(
   // Can't reward yourself
   if (user.id === tracked.triggerUserDiscordId) return
 
-  // Get server config
+  // Get server config (tracked.serverId is the internal UUID, not Discord ID)
   const server = tracked.serverId
-    ? getServerByDiscordId(db, tracked.serverId)
+    ? getServerById(db, tracked.serverId)
     : null
 
   const serverConfig = server?.config || {

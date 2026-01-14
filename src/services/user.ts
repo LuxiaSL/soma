@@ -249,6 +249,26 @@ export function getServerByDiscordId(db: Database, discordId: string): Server | 
 }
 
 /**
+ * Get server by internal ID (returns null if not found)
+ */
+export function getServerById(db: Database, id: string): Server | null {
+  const row = db.prepare(`
+    SELECT id, discord_id, config, created_at FROM servers WHERE id = ?
+  `).get(id) as ServerRow | undefined
+
+  if (!row) {
+    return null
+  }
+
+  return {
+    id: row.id,
+    discordId: row.discord_id,
+    config: parseServerConfig(row.config),
+    createdAt: new Date(row.created_at),
+  }
+}
+
+/**
  * Update server configuration
  * @param modifiedBy Discord user ID who made the change (optional, for tracking)
  */
