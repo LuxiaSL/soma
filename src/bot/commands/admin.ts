@@ -177,6 +177,20 @@ export const somaAdminCommand = new SlashCommandBuilder()
           .setRequired(true)
           .setMinValue(0)
           .setMaxValue(100000)))
+  .addSubcommand(sub =>
+    sub
+      .setName('global-reset-balances')
+      .setDescription('Reset ALL user balances to a specific value (economy reset)')
+      .addNumberOption(opt =>
+        opt.setName('amount')
+          .setDescription('New balance for all users')
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(100000))
+      .addBooleanOption(opt =>
+        opt.setName('confirm')
+          .setDescription('You must set this to true to confirm this action')
+          .setRequired(true)))
 
 /**
  * Check if user has admin access
@@ -333,6 +347,9 @@ export async function executeSomaAdmin(
       break
     case 'global-max-daily-received':
       await executeGlobalMaxDailyReceived(interaction, db)
+      break
+    case 'global-reset-balances':
+      await executeGlobalResetBalances(interaction, db)
       break
     default:
       await interaction.reply({
@@ -1499,6 +1516,91 @@ async function executeGlobalMaxDailyReceived(
     maxDailyReceived: amount,
     previousValue,
   }, 'Global max daily received updated')
+
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function executeGlobalResetBalances(
+  interaction: ChatInputCommandInteraction,
+  db: Database
+): Promise<void> {
+  const amount = interaction.options.getNumber('amount', true)
+  const confirmed = interaction.options.getBoolean('confirm', true)
+
+  if (!confirmed) {
+    await interaction.reply({
+      content: `${Emoji.CROSS} You must set \`confirm\` to **True** to reset all balances. This action cannot be undone.`,
+      flags: MessageFlags.Ephemeral,
+    })
+    return
+  }
+
+  // Get stats before reset
+  const beforeStats = db.prepare(`
+    SELECT 
+      COUNT(*) as userCount,
+      SUM(amount) as totalIchor,
+      AVG(amount) as avgBalance
+    FROM balances
+  `).get() as { userCount: number; totalIchor: number | null; avgBalance: number | null }
+
+  // Reset all balances and regen timestamps
+  const result = db.prepare(`
+    UPDATE balances 
+    SET amount = ?, last_regen_at = datetime('now')
+  `).run(amount)
+
+  const usersAffected = result.changes
+
+  const embed = new EmbedBuilder()
+    .setColor(Colors.WARNING_ORANGE)
+    .setTitle(`${Emoji.REVOKE} Economy Reset Complete`)
+    .setDescription(`All user balances have been set to **${amount} ichor**.`)
+    .addFields(
+      {
+        name: 'Users Affected',
+        value: `**${usersAffected.toLocaleString()}** users`,
+        inline: true,
+      },
+      {
+        name: 'Previous Total',
+        value: `**${(beforeStats.totalIchor || 0).toLocaleString()}** ichor`,
+        inline: true,
+      },
+      {
+        name: 'New Total',
+        value: `**${(usersAffected * amount).toLocaleString()}** ichor`,
+        inline: true,
+      },
+      {
+        name: 'Previous Average',
+        value: `**${(beforeStats.avgBalance || 0).toFixed(1)}** ichor`,
+        inline: true,
+      },
+      {
+        name: 'New Balance',
+        value: `**${amount}** ichor`,
+        inline: true,
+      },
+      {
+        name: '⏱️ Regeneration',
+        value: 'All regen timers have been reset to now.',
+        inline: true,
+      }
+    )
+    .setFooter({ text: `Reset by ${interaction.user.tag}` })
+    .setTimestamp()
+
+  logger.warn({
+    resetBy: interaction.user.id,
+    newBalance: amount,
+    usersAffected,
+    previousTotalIchor: beforeStats.totalIchor,
+    previousAvgBalance: beforeStats.avgBalance,
+  }, 'ECONOMY RESET: All balances reset')
 
   await interaction.reply({
     embeds: [embed],

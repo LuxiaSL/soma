@@ -68,15 +68,11 @@ function formatTimeToFull(hours: number): string {
 }
 
 /**
- * Format regen rate smartly - show /min for high rates, /hour for low rates
+ * Format regen rate - always show per hour
  */
 export function formatRegenRate(ratePerHour: number): string {
-  if (ratePerHour >= 60) {
-    // High rate: show per minute
-    const perMin = ratePerHour / 60
-    return `**${perMin.toFixed(1)}**/min`
-  } else if (ratePerHour >= 1) {
-    // Medium rate: show per hour as whole number or 1 decimal
+  if (ratePerHour >= 1) {
+    // Show as whole number if no decimal, otherwise 1 decimal
     return `**${ratePerHour % 1 === 0 ? ratePerHour : ratePerHour.toFixed(1)}**/hour`
   } else {
     // Low rate: show per hour with decimals
