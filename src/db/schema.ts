@@ -159,6 +159,6 @@ CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type, timestamp
 CREATE INDEX IF NOT EXISTS idx_bot_costs_bot ON bot_costs(bot_discord_id);
 CREATE INDEX IF NOT EXISTS idx_role_configs_server ON role_configs(server_id);
 CREATE INDEX IF NOT EXISTS idx_tracked_messages_expires ON tracked_messages(expires_at);
-CREATE INDEX IF NOT EXISTS idx_tracked_messages_trigger ON tracked_messages(trigger_message_id);
+-- Note: idx_tracked_messages_trigger is created by migration 009
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON user_notifications(user_id, read, created_at DESC);
 `
