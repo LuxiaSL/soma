@@ -25,6 +25,7 @@ import { getGlobalConfig } from '../../services/config.js'
 import { checkTransferLimits, recordTransfer } from '../../services/transfer-limits.js'
 import { DEFAULT_BOUNTY_TIERS } from '../../types/index.js'
 import { logger } from '../../utils/logger.js'
+import { getTodayDateStringPST } from '../../utils/timezone.js'
 
 /** Default reward emoji */
 const DEFAULT_REWARD_EMOJI = ['🔥']
@@ -55,10 +56,11 @@ export function setRewardDatabase(db: Database): void {
 }
 
 /**
- * Get today's date string in YYYY-MM-DD format
+ * Get today's date string in YYYY-MM-DD format (PST timezone)
+ * Daily rewards reset at midnight PST, not UTC.
  */
 function getTodayDateString(): string {
-  return new Date().toISOString().split('T')[0]
+  return getTodayDateStringPST()
 }
 
 /**

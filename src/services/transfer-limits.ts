@@ -8,12 +8,14 @@
 import type { Database } from 'better-sqlite3'
 import { getGlobalConfig } from './config.js'
 import { logger } from '../utils/logger.js'
+import { getTodayDateStringPST } from '../utils/timezone.js'
 
 /**
- * Get today's date string in YYYY-MM-DD format
+ * Get today's date string in YYYY-MM-DD format (PST timezone)
+ * Daily transfer limits reset at midnight PST, not UTC.
  */
 function getTodayDateString(): string {
-  return new Date().toISOString().split('T')[0]
+  return getTodayDateStringPST()
 }
 
 /**
