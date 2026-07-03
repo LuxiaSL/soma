@@ -206,7 +206,9 @@ CREATE INDEX IF NOT EXISTS idx_transactions_server ON transactions(server_id, ti
 CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type, timestamp);
 CREATE INDEX IF NOT EXISTS idx_bot_costs_bot ON bot_costs(bot_discord_id);
 CREATE INDEX IF NOT EXISTS idx_role_configs_server ON role_configs(server_id);
-CREATE INDEX IF NOT EXISTS idx_role_configs_priority ON role_configs(server_id, priority);
+-- NOTE: the priority index is created by migration 014, NOT here. SCHEMA runs
+-- before migrations, so on an existing DB the priority column does not exist
+-- yet at this point; indexing it here would crash startup (no such column).
 CREATE INDEX IF NOT EXISTS idx_tracked_messages_expires ON tracked_messages(expires_at);
 -- Note: idx_tracked_messages_trigger is created by migration 009
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON user_notifications(user_id, read, created_at DESC);
