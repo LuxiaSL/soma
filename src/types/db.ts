@@ -56,6 +56,7 @@ export interface RoleConfigRow {
   regen_multiplier: number
   max_balance_override: number | null
   cost_multiplier: number
+  priority: number
 }
 
 /**

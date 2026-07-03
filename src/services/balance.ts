@@ -4,13 +4,14 @@
  */
 
 import type { Database } from 'better-sqlite3'
-import type { BalanceRow, RoleConfigRow } from '../types/index.js'
+import type { BalanceRow } from '../types/index.js'
 import { getGlobalConfig } from './config.js'
 import { createTransaction } from './transaction.js'
 import { withTransaction } from '../db/connection.js'
 import { InsufficientBalanceError } from '../utils/errors.js'
 import { logger } from '../utils/logger.js'
 import { getGlobalEffectiveRegenRate } from './roles.js'
+import { resolveRoleModifiers, type RoleConfigModifierRow } from './role-resolution.js'
 
 /**
  * Calculate regenerated balance based on time elapsed
@@ -33,6 +34,46 @@ export function calculateRegenBalance(
 }
 
 /**
+ * Fetch the role configs (with all modifier columns) that apply to a user in a
+ * server, keyed by the server's Discord ID.
+ */
+function fetchRoleConfigsByDiscordId(
+  db: Database,
+  serverDiscordId: string,
+  userRoles: string[]
+): RoleConfigModifierRow[] {
+  if (userRoles.length === 0) return []
+
+  const placeholders = userRoles.map(() => '?').join(',')
+  return db.prepare(`
+    SELECT role_discord_id, regen_multiplier, cost_multiplier, max_balance_override, priority
+    FROM role_configs
+    WHERE server_id = (SELECT id FROM servers WHERE discord_id = ?)
+    AND role_discord_id IN (${placeholders})
+  `).all(serverDiscordId, ...userRoles) as RoleConfigModifierRow[]
+}
+
+/**
+ * Fetch the role configs that apply to a user in a server, keyed by the
+ * server's INTERNAL id (used by credit-add paths that only have the internal id).
+ */
+function fetchRoleConfigsByInternalId(
+  db: Database,
+  internalServerId: string,
+  userRoles: string[]
+): RoleConfigModifierRow[] {
+  if (userRoles.length === 0) return []
+
+  const placeholders = userRoles.map(() => '?').join(',')
+  return db.prepare(`
+    SELECT role_discord_id, regen_multiplier, cost_multiplier, max_balance_override, priority
+    FROM role_configs
+    WHERE server_id = ?
+    AND role_discord_id IN (${placeholders})
+  `).all(internalServerId, ...userRoles) as RoleConfigModifierRow[]
+}
+
+/**
  * Get the effective regen rate for a user in a server (with role multipliers)
  */
 export function getEffectiveRegenRate(
@@ -45,7 +86,8 @@ export function getEffectiveRegenRate(
 }
 
 /**
- * Get the effective regen rate along with the role ID that provides it
+ * Get the effective regen rate along with the role ID that provides it.
+ * Uses priority-tier resolution (highest-priority role wins).
  */
 export function getEffectiveRegenRateWithRole(
   db: Database,
@@ -53,65 +95,33 @@ export function getEffectiveRegenRateWithRole(
   userRoles: string[]
 ): { rate: number; roleId: string | null; multiplier: number } {
   const globalConfig = getGlobalConfig()
-  let multiplier = 1.0
-  let bestRoleId: string | null = null
-
-  if (userRoles.length > 0) {
-    // Get all role configs for this server that match user's roles
-    const placeholders = userRoles.map(() => '?').join(',')
-    const roleConfigs = db.prepare(`
-      SELECT role_discord_id, regen_multiplier FROM role_configs
-      WHERE server_id = (SELECT id FROM servers WHERE discord_id = ?)
-      AND role_discord_id IN (${placeholders})
-    `).all(serverId, ...userRoles) as { role_discord_id: string; regen_multiplier: number }[]
-
-    // Use highest multiplier and track which role provides it
-    for (const config of roleConfigs) {
-      if (config.regen_multiplier > multiplier) {
-        multiplier = config.regen_multiplier
-        bestRoleId = config.role_discord_id
-      }
-    }
-  }
+  const resolved = resolveRoleModifiers(fetchRoleConfigsByDiscordId(db, serverId, userRoles))
 
   return {
-    rate: globalConfig.baseRegenRate * multiplier,
-    roleId: bestRoleId,
-    multiplier,
+    rate: globalConfig.baseRegenRate * resolved.regenMultiplier,
+    roleId: resolved.regenRoleId,
+    multiplier: resolved.regenMultiplier,
   }
 }
 
 /**
- * Get the effective cost multiplier for a user in a server
+ * Get the effective cost multiplier for a user in a server.
+ * Uses priority-tier resolution (highest-priority role wins).
  */
 export function getEffectiveCostMultiplier(
   db: Database,
   serverId: string,
   userRoles: string[]
 ): number {
-  let multiplier = 1.0
-
-  if (userRoles.length > 0) {
-    const placeholders = userRoles.map(() => '?').join(',')
-    const roleConfigs = db.prepare(`
-      SELECT cost_multiplier FROM role_configs
-      WHERE server_id = (SELECT id FROM servers WHERE discord_id = ?)
-      AND role_discord_id IN (${placeholders})
-    `).all(serverId, ...userRoles) as Pick<RoleConfigRow, 'cost_multiplier'>[]
-
-    // Use lowest cost multiplier (best discount)
-    for (const config of roleConfigs) {
-      if (config.cost_multiplier < multiplier) {
-        multiplier = config.cost_multiplier
-      }
-    }
-  }
-
-  return multiplier
+  return resolveRoleModifiers(fetchRoleConfigsByDiscordId(db, serverId, userRoles)).costMultiplier
 }
 
 /**
- * Get the effective max balance for a user in a server
+ * Get the effective max balance for a user in a server.
+ *
+ * Uses priority-tier resolution and applies the winning role's override
+ * DIRECTLY — so a role can now LOWER a user's cap below the global max (e.g.
+ * capping a group at 5000 when the global max is higher), not only raise it.
  */
 export function getEffectiveMaxBalance(
   db: Database,
@@ -119,26 +129,47 @@ export function getEffectiveMaxBalance(
   userRoles: string[]
 ): number {
   const globalConfig = getGlobalConfig()
-  let maxBalance = globalConfig.maxBalance
+  const resolved = resolveRoleModifiers(fetchRoleConfigsByDiscordId(db, serverId, userRoles))
+  return resolved.maxBalanceOverride ?? globalConfig.maxBalance
+}
 
-  if (userRoles.length > 0) {
-    const placeholders = userRoles.map(() => '?').join(',')
-    const roleConfigs = db.prepare(`
-      SELECT max_balance_override FROM role_configs
-      WHERE server_id = (SELECT id FROM servers WHERE discord_id = ?)
-      AND role_discord_id IN (${placeholders})
-      AND max_balance_override IS NOT NULL
-    `).all(serverId, ...userRoles) as Pick<RoleConfigRow, 'max_balance_override'>[]
+/**
+ * Get the effective max balance for a user using their CACHED roles for a server
+ * (identified by internal server id). Credit-adding paths (rewards, tips, grants,
+ * transfers) don't carry live role context in the request, so we resolve against
+ * the roles cached from prior interactions. Falls back to the global max when
+ * there is no server context or no cached roles.
+ *
+ * This is what makes a role cap a *hard* cap: without it, rewards/tips/transfers
+ * would let a capped user's balance climb past their role's max.
+ */
+export function getEffectiveMaxBalanceForCachedRoles(
+  db: Database,
+  userId: string,
+  internalServerId: string | null
+): number {
+  const globalConfig = getGlobalConfig()
+  if (!internalServerId) return globalConfig.maxBalance
 
-    // Use highest max balance override
-    for (const config of roleConfigs) {
-      if (config.max_balance_override !== null && config.max_balance_override > maxBalance) {
-        maxBalance = config.max_balance_override
-      }
-    }
+  const row = db.prepare(`
+    SELECT role_ids FROM user_server_roles WHERE user_id = ? AND server_id = ?
+  `).get(userId, internalServerId) as { role_ids: string } | undefined
+
+  if (!row) return globalConfig.maxBalance
+
+  let roleIds: string[]
+  try {
+    const parsed = JSON.parse(row.role_ids)
+    roleIds = Array.isArray(parsed) ? parsed : []
+  } catch {
+    logger.warn({ userId, internalServerId }, 'Failed to parse cached role_ids for max balance lookup')
+    return globalConfig.maxBalance
   }
 
-  return maxBalance
+  if (roleIds.length === 0) return globalConfig.maxBalance
+
+  const resolved = resolveRoleModifiers(fetchRoleConfigsByInternalId(db, internalServerId, roleIds))
+  return resolved.maxBalanceOverride ?? globalConfig.maxBalance
 }
 
 /**
@@ -326,12 +357,15 @@ export function deductBalanceSimple(
   return withTransaction(db, () => {
     const globalConfig = getGlobalConfig()
 
+    // Respect the user's role-based cap (via cached roles) as the regen ceiling
+    const effectiveMaxBalance = getEffectiveMaxBalanceForCachedRoles(db, userId, serverId)
+
     // Apply regen first
     const currentBalance = applyRegen(
       db,
       userId,
       globalConfig.baseRegenRate,
-      globalConfig.maxBalance
+      effectiveMaxBalance
     )
 
     if (currentBalance < amount) {
@@ -384,15 +418,20 @@ export function addBalance(
   return withTransaction(db, () => {
     const globalConfig = getGlobalConfig()
 
-    // Apply regen first (use global rates since we might not have server context)
+    // Respect the recipient's role-based cap (via cached roles). This makes a
+    // role max a *hard* cap: rewards/tips/grants can no longer push a capped
+    // user past their role's max (and can fill a VIP up to a raised cap).
+    const effectiveMaxBalance = getEffectiveMaxBalanceForCachedRoles(db, userId, serverId)
+
+    // Apply regen first (use global rate since we might not have live server context)
     const currentBalance = applyRegen(
       db,
       userId,
       globalConfig.baseRegenRate,
-      globalConfig.maxBalance
+      effectiveMaxBalance
     )
 
-    const newBalance = Math.min(globalConfig.maxBalance, currentBalance + amount)
+    const newBalance = Math.min(effectiveMaxBalance, currentBalance + amount)
 
     // Update balance
     db.prepare(`
@@ -442,12 +481,16 @@ export function transferBalance(
   return withTransaction(db, () => {
     const globalConfig = getGlobalConfig()
 
+    // Each party's regen ceiling / cap respects their own role-based max
+    const fromMaxBalance = getEffectiveMaxBalanceForCachedRoles(db, fromUserId, serverId)
+    const toMaxBalance = getEffectiveMaxBalanceForCachedRoles(db, toUserId, serverId)
+
     // Apply regen to sender
     const fromCurrentBalance = applyRegen(
       db,
       fromUserId,
       globalConfig.baseRegenRate,
-      globalConfig.maxBalance
+      fromMaxBalance
     )
 
     if (fromCurrentBalance < amount) {
@@ -459,11 +502,11 @@ export function transferBalance(
       db,
       toUserId,
       globalConfig.baseRegenRate,
-      globalConfig.maxBalance
+      toMaxBalance
     )
 
     const fromNewBalance = fromCurrentBalance - amount
-    const toNewBalance = Math.min(globalConfig.maxBalance, toCurrentBalance + amount)
+    const toNewBalance = Math.min(toMaxBalance, toCurrentBalance + amount)
 
     // Update sender
     db.prepare(`

@@ -303,6 +303,7 @@ export function setRoleConfig(
     regenMultiplier?: number
     maxBalanceOverride?: number | null
     costMultiplier?: number
+    priority?: number
   }
 ): void {
   // Get server internal ID
@@ -335,6 +336,10 @@ export function setRoleConfig(
       updates.push('cost_multiplier = ?')
       values.push(config.costMultiplier)
     }
+    if (config.priority !== undefined) {
+      updates.push('priority = ?')
+      values.push(config.priority)
+    }
 
     if (updates.length > 0) {
       db.prepare(`
@@ -346,15 +351,16 @@ export function setRoleConfig(
   } else {
     const id = generateId()
     db.prepare(`
-      INSERT INTO role_configs (id, server_id, role_discord_id, regen_multiplier, max_balance_override, cost_multiplier)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO role_configs (id, server_id, role_discord_id, regen_multiplier, max_balance_override, cost_multiplier, priority)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       server.id,
       roleDiscordId,
       config.regenMultiplier ?? 1.0,
       config.maxBalanceOverride ?? null,
-      config.costMultiplier ?? 1.0
+      config.costMultiplier ?? 1.0,
+      config.priority ?? 0
     )
 
     logger.info({ serverId, roleDiscordId, config }, 'Created role config')

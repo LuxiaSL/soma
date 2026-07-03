@@ -10,6 +10,7 @@
 import type { Database } from 'better-sqlite3'
 import { getGlobalConfig } from './config.js'
 import { logger } from '../utils/logger.js'
+import { resolveRoleModifiers, type RoleConfigModifierRow } from './role-resolution.js'
 
 interface CachedServerRoles {
   odId: string  // server internal ID
@@ -100,22 +101,19 @@ export function getGlobalEffectiveRegenRate(
     // Get role configs for this server
     const placeholders = serverCache.roleIds.map(() => '?').join(',')
     const roleConfigs = db.prepare(`
-      SELECT role_discord_id, regen_multiplier 
+      SELECT role_discord_id, regen_multiplier, cost_multiplier, max_balance_override, priority
       FROM role_configs
       WHERE server_id = ?
       AND role_discord_id IN (${placeholders})
-    `).all(serverCache.odId, ...serverCache.roleIds) as Array<{
-      role_discord_id: string
-      regen_multiplier: number
-    }>
+    `).all(serverCache.odId, ...serverCache.roleIds) as RoleConfigModifierRow[]
 
-    // Find the highest multiplier from this server
-    for (const config of roleConfigs) {
-      if (config.regen_multiplier > bestMultiplier) {
-        bestMultiplier = config.regen_multiplier
-        bestRoleId = config.role_discord_id
-        bestServerId = serverCache.serverDiscordId
-      }
+    // Resolve this server's regen via priority tiers (highest-priority role wins),
+    // then take the best resulting rate across all servers ("best role follows you")
+    const resolved = resolveRoleModifiers(roleConfigs)
+    if (resolved.regenMultiplier > bestMultiplier) {
+      bestMultiplier = resolved.regenMultiplier
+      bestRoleId = resolved.regenRoleId
+      bestServerId = serverCache.serverDiscordId
     }
   }
 

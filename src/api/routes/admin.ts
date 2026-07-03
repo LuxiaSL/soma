@@ -186,7 +186,7 @@ export function createAdminRouter(db: Database): Router {
   // Set role configuration
   router.post('/admin/set-role', (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { serverId, roleId, regenMultiplier, maxBalanceOverride, costMultiplier } = req.body
+      const { serverId, roleId, regenMultiplier, maxBalanceOverride, costMultiplier, priority } = req.body
 
       if (!serverId) {
         throw new ValidationError('Missing required field: serverId', 'serverId')
@@ -194,15 +194,21 @@ export function createAdminRouter(db: Database): Router {
       if (!roleId) {
         throw new ValidationError('Missing required field: roleId', 'roleId')
       }
+      if (priority !== undefined && priority !== null) {
+        if (typeof priority !== 'number' || !Number.isInteger(priority) || priority < -1000 || priority > 1000) {
+          throw new ValidationError('priority must be an integer between -1000 and 1000', 'priority')
+        }
+      }
 
       // Ensure server exists
       getOrCreateServer(db, serverId)
 
-      // Set role config
+      // Set role config (priority coerced to 0 when null so it clears any prior value)
       setRoleConfig(db, serverId, roleId, {
         regenMultiplier,
         maxBalanceOverride,
         costMultiplier,
+        priority: priority === null ? 0 : priority,
       })
 
       logger.info({
@@ -211,6 +217,7 @@ export function createAdminRouter(db: Database): Router {
         regenMultiplier,
         maxBalanceOverride,
         costMultiplier,
+        priority,
       }, 'Role config set')
 
       res.json({ success: true })

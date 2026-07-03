@@ -301,6 +301,21 @@ const MIGRATIONS: Migration[] = [
       db.exec(`CREATE INDEX IF NOT EXISTS idx_bot_sleeps_lookup ON bot_sleeps(server_id, channel_id, bot_name)`)
     }
   },
+  {
+    id: '014_add_role_priority',
+    description: 'Add priority column to role_configs for precedence-based resolution (highest-priority role wins)',
+    up: (db) => {
+      // Idempotent column add (fresh databases already get it from schema.ts)
+      const tableInfo = db.prepare(`PRAGMA table_info(role_configs)`).all() as Array<{ name: string }>
+      const existingColumns = new Set(tableInfo.map(c => c.name))
+
+      if (!existingColumns.has('priority')) {
+        // Existing rows default to 0 → identical to the legacy "best role wins" behaviour
+        db.exec(`ALTER TABLE role_configs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0`)
+      }
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_role_configs_priority ON role_configs(server_id, priority)`)
+    }
+  },
 ]
 
 /**

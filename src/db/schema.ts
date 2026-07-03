@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS role_configs (
   regen_multiplier REAL DEFAULT 1.0,
   max_balance_override REAL,
   cost_multiplier REAL DEFAULT 1.0,
+  priority INTEGER NOT NULL DEFAULT 0,
   UNIQUE (server_id, role_discord_id)
 );
 
@@ -205,6 +206,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_server ON transactions(server_id, ti
 CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type, timestamp);
 CREATE INDEX IF NOT EXISTS idx_bot_costs_bot ON bot_costs(bot_discord_id);
 CREATE INDEX IF NOT EXISTS idx_role_configs_server ON role_configs(server_id);
+CREATE INDEX IF NOT EXISTS idx_role_configs_priority ON role_configs(server_id, priority);
 CREATE INDEX IF NOT EXISTS idx_tracked_messages_expires ON tracked_messages(expires_at);
 -- Note: idx_tracked_messages_trigger is created by migration 009
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON user_notifications(user_id, read, created_at DESC);
