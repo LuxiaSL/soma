@@ -20,19 +20,8 @@ import { join } from 'path'
 import { parse as yamlParse, stringify as yamlStringify } from 'yaml'
 import { CONFIG_KEYS } from '../../../infra/config-message.js'
 import { getPinnedData } from '../../../infra/pin-cache.js'
+import { redactConfig, redactString, isRedacted } from '../../../infra/redact.js'
 import { logger } from '../../../utils/logger.js'
-
-/** Sensitive keys to strip from config output */
-const SENSITIVE_KEYS = [
-  'discord_token',
-  'api_key',
-  'openai_api_key',
-  'anthropic_api_key',
-  'openrouter_api_key',
-  'token',
-  'secret',
-  'password',
-]
 
 /**
  * EMS path — the directory containing bot configs in EMS layout.
@@ -87,10 +76,19 @@ export async function executeGetConfig(
     let config: Record<string, unknown>
     try {
       const raw = readFileSync(configPath, 'utf-8')
-      config = yamlParse(raw) as Record<string, unknown>
+      const parsed = yamlParse(raw) as unknown
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        await interaction.editReply({
+          content: `❌ Config for **${botName}** is not a YAML mapping.`,
+        })
+        return
+      }
+      config = parsed as Record<string, unknown>
     } catch (error) {
+      // YAML parse errors quote the offending source line — redact before echoing.
+      const detail = error instanceof Error ? redactString(error.message) : 'Unknown error'
       await interaction.editReply({
-        content: `❌ Failed to parse config for **${botName}**: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        content: `❌ Failed to parse config for **${botName}**: ${detail}`,
       })
       return
     }
@@ -133,15 +131,28 @@ export async function executeGetConfig(
       }
     }
 
-    // Strip sensitive keys
-    for (const key of SENSITIVE_KEYS) {
-      delete config[key]
+    // Redact credentials — recursively, after the pin overlay, so anything a
+    // pinned .config introduced is scrubbed too. Fail closed: if redaction
+    // itself errors we send nothing rather than falling back to raw config.
+    let safeConfig: Record<string, unknown>
+    try {
+      safeConfig = redactConfig(config)
+    } catch (error) {
+      logger.error({ error, botName }, 'Config redaction failed — withholding config')
+      await interaction.editReply({
+        content: `❌ Could not safely redact the config for **${botName}**, so it was not sent.`,
+      })
+      return
     }
 
     // Return specific property or full config
     if (property) {
-      const value = config[property]
-      if (value === undefined) {
+      const value = safeConfig[property]
+      if (isRedacted(value)) {
+        await interaction.editReply({
+          content: `🔒 **${botName}**.${property} is set, but withheld — it looks like a credential.`,
+        })
+      } else if (value === undefined) {
         await interaction.editReply({
           content: `**${botName}**.${property} is not set.`,
         })
@@ -155,7 +166,7 @@ export async function executeGetConfig(
       }
     } else {
       // Return full config as YAML file
-      const yamlOutput = yamlStringify(config, { lineWidth: 0 })
+      const yamlOutput = yamlStringify(safeConfig, { lineWidth: 0 })
       const filename = `${botName}-config.yaml`
       const attachment = new AttachmentBuilder(
         Buffer.from(yamlOutput, 'utf-8'),
@@ -176,8 +187,9 @@ export async function executeGetConfig(
     }, 'Config retrieved via /get_config')
   } catch (error) {
     logger.error({ error, userId: interaction.user.id }, 'Error in /get_config command')
+    const detail = error instanceof Error ? redactString(error.message) : 'Unknown error'
     await interaction.editReply({
-      content: `❌ Failed to get config: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      content: `❌ Failed to get config: ${detail}`,
     })
   }
 }
